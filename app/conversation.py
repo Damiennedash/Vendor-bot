@@ -46,6 +46,34 @@ def handle_message(phone, body):
         get_session(phone)["step"] = "issue"
         return _menu_text(), None
 
+    # Messages de declenchement QR → traiter comme consentement OUI
+    TRIGGER_MSGS = [
+        "bonjour, je souhaite enregistrer ma presence du jour.",
+        "bonjour, je souhaite enregistrer ma présence du jour.",
+        "bonjour je souhaite enregistrer ma presence du jour",
+        "bonjour je souhaite enregistrer ma présence du jour",
+    ]
+    if body in TRIGGER_MSGS and step == "consent":
+        session["step"] = "id"
+        data["consent"] = "Oui"
+
+        if phone in VENDOR_MEMORY:
+            data["vendor_id"] = VENDOR_MEMORY[phone]
+            session["step"] = "attendance"
+            return (
+                "Bonjour ! Content de vous revoir !\n\n"
+                "Etes-vous en train de vendre *aujourd\'hui* ?\n\n"
+                "1 - Oui, je vends\n"
+                "2 - Peut-etre\n"
+                "3 - Non, pas aujourd\'hui"
+            ), None
+
+        return (
+            "Bienvenue chez *Company Vendor Support* !\n\n"
+            "Veuillez entrer votre *ID Vendeur* pour commencer.\n"
+            "_(exemple : V-0042)_"
+        ), None
+
     # ── ETAPE 0 : Consentement ────────────────────────────────────────────────
     if step == "consent":
         session["step"] = "id"
