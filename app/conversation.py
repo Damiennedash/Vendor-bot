@@ -1,25 +1,26 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime
-from .whatsapp import send_buttons, send_message
 
 ISSUE_MAP = {
-    "product":      ("Probleme Produit",                  "Product"),
-    "relation":     ("Probleme Relation / micro-distrib", "Relationship"),
-    "income":       ("Probleme Revenu / paiement",        "Income"),
-    "motivation":   ("Motivation / formation",            "Motivation"),
-    "equipment":    ("Probleme Equipement",               "Equipment"),
-    "prix":         ("Confirmation prix du jour",         ""),
-    "support":      ("Demande support direct",            ""),
-    "aucun":        ("Aucun probleme",                    ""),
+    "1": ("Probleme Produit",                  "Product"),
+    "2": ("Probleme Relation / micro-distrib", "Relationship"),
+    "3": ("Probleme Revenu / paiement",        "Income"),
+    "4": ("Motivation / formation",            "Motivation"),
+    "5": ("Probleme Equipement",               "Equipment"),
+    "6": ("Confirmation prix du jour",         ""),
+    "7": ("Demande support direct",            ""),
+    "8": ("Aucun probleme",                    ""),
 }
 
-VENDOR_MEMORY = {}  # { phone: vendor_id }
+# Memoire permanente : { phone: vendor_id }
+VENDOR_MEMORY = {}
 SESSIONS = {}
 
 MOTS_INVALIDES = [
     "oui", "non", "ok", "yes", "no", "menu", "bonjour", "bonsoir",
-    "salut", "allo", "allô", "peut-etre", "peut être", "1", "2", "3",
-    "consent_oui", "consent_non", "present_oui", "present_non", "present_peut"
+    "salut", "allo", "peut-etre", "1", "2", "3", "4", "5", "6", "7", "8",
+    "bonjour, je souhaite enregistrer ma presence du jour.",
+    "bonjour, je souhaite enregistrer ma présence du jour.",
 ]
 
 
@@ -34,262 +35,155 @@ def reset_session(phone):
 
 
 def handle_message(phone, body):
-    body = body.strip()
+    body_raw = body.strip()
+    body = body_raw.lower().strip()
     session = get_session(phone)
     step = session["step"]
     data = session["data"]
 
-    if body.upper() == "MENU":
+    if body == "menu":
         reset_session(phone)
-        get_session(phone)["step"] = "issue1"
-        _send_issue_part1(phone)
-        return None, None
+        get_session(phone)["step"] = "issue"
+        return _menu_text(), None
 
     # ── ETAPE 0 : Consentement ────────────────────────────────────────────────
     if step == "consent":
         session["step"] = "id"
-        send_buttons(phone,
+        return (
             "Bienvenue chez *Company Vendor Support* !\n\n"
-            "Acceptez-vous de recevoir nos messages WhatsApp sur les produits, "
-            "prix, formation et operations vendeurs ?",
-            [
-                {"id": "consent_oui", "title": "Oui j'accepte"},
-                {"id": "consent_non", "title": "Non merci"},
-            ]
-        )
-        return None, None
+            "Pour mieux vous accompagner, nous aimerions vous envoyer "
+            "des messages WhatsApp sur les produits, prix, formation "
+            "et operations vendeurs.\n\n"
+            "Repondez *OUI* pour accepter."
+        ), None
 
     # ── ETAPE 1 : Vendor ID ───────────────────────────────────────────────────
     if step == "id":
-        if body == "consent_non":
-            reset_session(phone)
-            send_message(phone, "Pas de probleme. Envoyez *MENU* a tout moment.")
-            return None, None
-
         data["consent"] = "Oui"
 
-        # Vendor deja connu → skip ID, on l'enregistre directement
         if phone in VENDOR_MEMORY:
             data["vendor_id"] = VENDOR_MEMORY[phone]
             session["step"] = "attendance"
-            send_buttons(phone,
+            return (
                 "Bonjour ! Content de vous revoir !\n\n"
-                "Etes-vous en train de vendre *aujourd'hui* ?",
-                [
-                    {"id": "present_oui",  "title": "Oui je vends"},
-                    {"id": "present_peut", "title": "Peut-etre"},
-                    {"id": "present_non",  "title": "Non pas aujourd'hui"},
-                ]
-            )
-            return None, None
+                "Etes-vous en train de vendre *aujourd'hui* ?\n\n"
+                "1 - Oui, je vends\n"
+                "2 - Peut-etre\n"
+                "3 - Non, pas aujourd'hui"
+            ), None
 
         session["step"] = "attendance"
-        send_message(phone,
+        return (
             "Merci !\n\n"
             "Veuillez entrer votre *ID Vendeur*.\n"
             "_(exemple : V-0042)_"
-        )
-        return None, None
+        ), None
 
     # ── ETAPE 2 : Presence ────────────────────────────────────────────────────
     if step == "attendance":
-        # Enregistrement ID si pas encore fait
         if "vendor_id" not in data:
-            if body.lower() in MOTS_INVALIDES or len(body) < 2:
-                send_message(phone,
+            if body in MOTS_INVALIDES or len(body_raw) < 2:
+                return (
                     "Veuillez entrer votre *ID Vendeur* valide.\n"
                     "_(exemple : V-0042 ou 90123456)_"
-                )
-                return None, None
-            data["vendor_id"] = body
-            VENDOR_MEMORY[phone] = body
-            send_buttons(phone,
+                ), None
+            data["vendor_id"] = body_raw
+            VENDOR_MEMORY[phone] = body_raw
+            return (
                 "ID enregistre : *{}*\n\n"
-                "Etes-vous en train de vendre *aujourd'hui* ?".format(body),
-                [
-                    {"id": "present_oui",  "title": "Oui je vends"},
-                    {"id": "present_peut", "title": "Peut-etre"},
-                    {"id": "present_non",  "title": "Non pas aujourd'hui"},
-                ]
-            )
-            return None, None
+                "Etes-vous en train de vendre *aujourd'hui* ?\n\n"
+                "1 - Oui, je vends\n"
+                "2 - Peut-etre\n"
+                "3 - Non, pas aujourd'hui"
+            ).format(body_raw), None
 
-        # Reponse presence
-        if body == "present_oui":
+        if body in ["1", "oui"]:
             data["attendance"] = "Oui"
-        elif body == "present_peut":
+        elif body in ["2", "peut-etre", "peut être", "peutetre"]:
             data["attendance"] = "Peut-etre"
-        elif body == "present_non":
+        elif body in ["3", "non"]:
             data["attendance"] = "Non"
         else:
-            send_buttons(phone,
-                "Etes-vous en train de vendre *aujourd'hui* ?",
-                [
-                    {"id": "present_oui",  "title": "Oui je vends"},
-                    {"id": "present_peut", "title": "Peut-etre"},
-                    {"id": "present_non",  "title": "Non pas aujourd'hui"},
-                ]
-            )
-            return None, None
+            return (
+                "Repondez avec le numero :\n\n"
+                "1 - Oui, je vends\n"
+                "2 - Peut-etre\n"
+                "3 - Non, pas aujourd'hui"
+            ), None
 
-        session["step"] = "issue1"
-        _send_issue_part1(phone)
-        return None, None
+        session["step"] = "issue"
+        return _menu_text(), None
 
-    # ── ETAPE 3a : Probleme PRIME — partie 1 (3 choix) ───────────────────────
-    if step == "issue1":
-        if body in ["product", "relation", "income"]:
-            return _handle_issue(phone, body, session, data)
-        elif body == "suite":
-            session["step"] = "issue2"
-            _send_issue_part2(phone)
-            return None, None
-        else:
-            _send_issue_part1(phone)
-            return None, None
+    # ── ETAPE 3 : Probleme PRIME ──────────────────────────────────────────────
+    if step == "issue":
+        if body_raw not in ISSUE_MAP:
+            return _menu_text(), None
 
-    # ── ETAPE 3b : Probleme PRIME — partie 2 ────────────────────────────────
-    if step == "issue2":
-        if body in ["motivation", "equipment", "income"]:
-            return _handle_issue(phone, body, session, data)
-        elif body == "suite2":
-            session["step"] = "issue3"
-            _send_issue_part3(phone)
-            return None, None
-        else:
-            _send_issue_part2(phone)
-            return None, None
+        categorie, prime = ISSUE_MAP[body_raw]
+        data["categorie"] = categorie
+        data["prime"] = prime
 
-    # ── ETAPE 3c : Probleme PRIME — partie 3 ────────────────────────────────
-    if step == "issue3":
-        if body in ["prix", "support", "aucun"]:
-            return _handle_issue(phone, body, session, data)
-        else:
-            _send_issue_part3(phone)
-            return None, None
+        if body_raw == "8":
+            row = _build_row(phone, data, "")
+            reset_session(phone)
+            return (
+                "Parfait, bonne journee de vente !\n\n"
+                "Votre presence a bien ete enregistree.\n\n"
+                "*A demain !*"
+            ), row
+
+        if body_raw == "6":
+            row = _build_row(phone, data, "Demande prix du jour")
+            reset_session(phone)
+            return (
+                "Votre demande de prix a ete transmise.\n\n"
+                "Notre equipe vous repond rapidement.\n\n"
+                "*A demain !*"
+            ), row
+
+        if body_raw == "7":
+            row = _build_row(phone, data, "Demande support direct")
+            reset_session(phone)
+            return (
+                "Un agent vous contactera tres prochainement.\n\n"
+                "*A demain !*"
+            ), row
+
+        session["step"] = "comment"
+        return (
+            "Vous avez signale : *{}*\n\n"
+            "Decrivez brievement votre probleme _(optionnel)_ :\n"
+            "_(Envoyez un tiret - si vous n'avez rien a ajouter)_"
+        ).format(categorie), None
 
     # ── ETAPE 4 : Commentaire ─────────────────────────────────────────────────
     if step == "comment":
-        if body == "comment_non":
-            row = _build_row(phone, data, "")
-            reset_session(phone)
-            send_message(phone,
-                "Merci, votre probleme a bien ete recu !\n\n"
-                "Notre equipe fera un suivi via votre micro-distributeur "
-                "ou superviseur commercial.\n\n"
-                "*A demain !*"
-            )
-            return None, row
-        elif body == "comment_oui":
-            session["step"] = "comment_text"
-            send_message(phone, "Decrivez brievement votre probleme :")
-            return None, None
-        else:
-            row = _build_row(phone, data, body)
-            reset_session(phone)
-            send_message(phone,
-                "Merci, votre probleme a bien ete recu !\n\n"
-                "Notre equipe fera un suivi via votre micro-distributeur "
-                "ou superviseur commercial.\n\n"
-                "*A demain !*"
-            )
-            return None, row
-
-    # ── ETAPE 4b : Texte commentaire ─────────────────────────────────────────
-    if step == "comment_text":
-        row = _build_row(phone, data, body)
+        commentaire = "" if body_raw in ["-", ".", " "] else body_raw
+        row = _build_row(phone, data, commentaire)
         reset_session(phone)
-        send_message(phone,
+        return (
             "Merci, votre probleme a bien ete recu !\n\n"
             "Notre equipe fera un suivi via votre micro-distributeur "
             "ou superviseur commercial.\n\n"
             "*A demain !*"
-        )
-        return None, row
+        ), row
 
     reset_session(phone)
-    send_message(phone, "Envoyez *MENU* pour acceder au support.")
-    return None, None
+    return "Envoyez *MENU* pour acceder au support.", None
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _handle_issue(phone, body, session, data):
-    categorie, prime = ISSUE_MAP[body]
-    data["categorie"] = categorie
-    data["prime"] = prime
-
-    if body == "aucun":
-        row = _build_row(phone, data, "")
-        reset_session(phone)
-        send_message(phone,
-            "Parfait, bonne journee de vente !\n\n"
-            "Votre presence a bien ete enregistree.\n\n"
-            "*A demain !*"
-        )
-        return None, row
-
-    if body == "prix":
-        row = _build_row(phone, data, "Demande prix du jour")
-        reset_session(phone)
-        send_message(phone,
-            "Votre demande de prix a ete transmise.\n\n"
-            "Notre equipe vous repond rapidement.\n\n"
-            "*A demain !*"
-        )
-        return None, row
-
-    if body == "support":
-        row = _build_row(phone, data, "Demande support direct")
-        reset_session(phone)
-        send_message(phone,
-            "Un agent vous contactera tres prochainement.\n\n"
-            "*A demain !*"
-        )
-        return None, row
-
-    session["step"] = "comment"
-    send_buttons(phone,
-        "Vous avez signale : *{}*\n\n"
-        "Voulez-vous ajouter un commentaire ?".format(categorie),
-        [
-            {"id": "comment_oui", "title": "Oui je decris"},
-            {"id": "comment_non", "title": "Non continuer"},
-        ]
-    )
-    return None, None
-
-
-def _send_issue_part1(phone):
-    send_buttons(phone,
-        "Avez-vous un probleme aujourd'hui ? *(1/2)*",
-        [
-            {"id": "product",  "title": "Probleme Produit"},
-            {"id": "relation", "title": "Probleme Relation"},
-            {"id": "suite",    "title": "Voir plus..."},
-        ]
-    )
-
-
-def _send_issue_part2(phone):
-    send_buttons(phone,
-        "Avez-vous un probleme aujourd'hui ? *(2/3)*",
-        [
-            {"id": "income",     "title": "Revenu / paiement"},
-            {"id": "motivation", "title": "Motivation / formation"},
-            {"id": "suite2",     "title": "Voir plus..."},
-        ]
-    )
-
-
-def _send_issue_part3(phone):
-    send_buttons(phone,
-        "Autres options :",
-        [
-            {"id": "prix",    "title": "Prix du jour"},
-            {"id": "support", "title": "Parler au support"},
-            {"id": "aucun",   "title": "Aucun probleme"},
-        ]
+def _menu_text():
+    return (
+        "Avez-vous un probleme aujourd'hui ?\n\n"
+        "1 - J'ai un probleme produit\n"
+        "2 - J'ai un probleme micro-distributeur / relation\n"
+        "3 - J'ai une question revenu ou paiement\n"
+        "4 - J'ai besoin d'une formation ou conseils de vente\n"
+        "5 - J'ai un probleme d'equipement\n"
+        "6 - Je veux confirmer le prix du jour\n"
+        "7 - Je veux parler au support\n"
+        "8 - Aucun probleme\n\n"
+        "Repondez avec le *numero* correspondant."
     )
 
 
@@ -306,9 +200,3 @@ def _build_row(phone, data, commentaire):
         commentaire,
         "WhatsApp QR",
     ]
-
-# NOTE pour main.py :
-# Apres issue2, si l'utilisateur clique "Voir plus...", envoyer _send_issue_part3
-# Ajouter dans le flow issue2 :
-# elif body == "suite2":
-#     _send_issue_part3(phone)
