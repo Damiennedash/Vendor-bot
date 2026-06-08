@@ -1,178 +1,265 @@
 """
-Gestion de la conversation — machine à états par numéro de téléphone.
-Toutes les étapes du check-in quotidien en français.
+Conversation — machine à états avec boutons interactifs WhatsApp.
+- Boutons Oui / Peut-être / Non pour la présence
+- Liste interactive pour les 8 options PRIME
+- Mémorisation du Vendor ID
+- Message de fin "À demain !"
 """
 
 from datetime import datetime
+from .whatsapp import send_buttons, send_list, send_message
 
-# ── Mapping choix → pilier PRIME ─────────────────────────────────────────────
 ISSUE_MAP = {
-    "1": ("Problème Produit",                 "Product"),
-    "2": ("Problème Relation / micro-distrib","Relationship"),
-    "3": ("Problème Revenu / paiement",       "Income"),
-    "4": ("Motivation / formation",           "Motivation"),
-    "5": ("Problème Équipement",              "Equipment"),
-    "6": ("Aucun problème",                   ""),
-    "0": ("Autre",                            "Other"),
+    "1": ("Problème Produit",                  "Product"),
+    "2": ("Problème Relation / micro-distrib", "Relationship"),
+    "3": ("Problème Revenu / paiement",        "Income"),
+    "4": ("Motivation / formation",            "Motivation"),
+    "5": ("Problème Équipement",               "Equipment"),
+    "6": ("Confirmation prix du jour",         ""),
+    "7": ("Demande support direct",            ""),
+    "8": ("Aucun problème",                    ""),
 }
 
-# ── Sessions en mémoire (remplacer par Redis en production) ───────────────────
-# Format : { phone: { "step": str, "data": dict } }
+VENDOR_MEMORY: dict = {}
 SESSIONS: dict = {}
 
-# ── Étapes du flow ────────────────────────────────────────────────────────────
-STEPS = ["consent", "id", "attendance", "issue", "comment", "done"]
+OUI_IDS   = ["present_oui", "✅ Oui, je vends"]
+PEUT_IDS  = ["present_peut", "🔄 Peut-être"]
+NON_IDS   = ["present_non", "❌ Non, pas aujourd'hui"]
+
+PRESENCE_BUTTONS = [
+    {"id": "present_oui",  "title": "✅ Oui, je vends"},
+    {"id": "present_peut", "title": "🔄 Peut-être"},
+    {"id": "present_non",  "title": "❌ Non, pas aujourd'hui"},
+]
+
+COMMENT_BUTTONS = [
+    {"id": "comment_oui", "title": "✍️ Oui, je décris"},
+    {"id": "comment_non", "title": "➡️ Non, continuer"},
+]
+
+CONSENT_BUTTONS = [
+    {"id": "consent_oui", "title": "✅ Oui, j'accepte"},
+    {"id": "consent_non", "title": "❌ Non merci"},
+]
 
 
-def get_session(phone: str) -> dict:
+def get_session(phone):
     if phone not in SESSIONS:
         SESSIONS[phone] = {"step": "consent", "data": {}}
     return SESSIONS[phone]
 
 
-def reset_session(phone: str):
+def reset_session(phone):
     SESSIONS[phone] = {"step": "consent", "data": {}}
 
 
-def handle_message(phone: str, body: str) -> tuple[str, list | None]:
-    """
-    Retourne (texte_de_réponse, ligne_sheets_ou_None).
-    ligne_sheets = liste de valeurs à écrire quand le flow est complet.
-    """
+def handle_message(phone: str, body: str):
     body = body.strip()
     session = get_session(phone)
-    step    = session["step"]
-    data    = session["data"]
+    step = session["step"]
+    data = session["data"]
+
+    # Commande MENU
+    if body.upper() == "MENU":
+        reset_session(phone)
+        get_session(phone)["step"] = "issue"
+        _send_issue_list(phone)
+        return None, None
 
     # ── ÉTAPE 0 : Consentement ────────────────────────────────────────────────
     if step == "consent":
-        msg = (
+        session["step"] = "id"
+        send_buttons(
+            phone,
             "👋 Bienvenue chez *Company Vendor Support* !\n\n"
             "Pour mieux vous accompagner, nous aimerions vous envoyer des messages "
             "WhatsApp sur les produits, prix, formation et opérations vendeurs.\n\n"
-            "Répondez *OUI* pour accepter ou *NON* pour refuser."
+            "Acceptez-vous de recevoir nos messages ?",
+            CONSENT_BUTTONS
         )
-        session["step"] = "id"
-        return msg, None
+        return None, None
 
-    # ── ÉTAPE 1 : ID Vendor ───────────────────────────────────────────────────
+    # ── ÉTAPE 1 : Vendor ID ───────────────────────────────────────────────────
     if step == "id":
-        if body.upper() == "NON":
+        if body in ["consent_non", "❌ Non merci"]:
             reset_session(phone)
-            return "Pas de problème. Vous pouvez envoyer *MENU* à tout moment pour accéder au support.", None
+            send_message(phone, "Pas de problème. Envoyez *MENU* à tout moment. 👋")
+            return None, None
 
-        data["consent"] = "Oui" if body.upper() == "OUI" else "Oui (implicite)"
+        data["consent"] = "Oui"
+
+        if phone in VENDOR_MEMORY:
+            data["vendor_id"] = VENDOR_MEMORY[phone]
+            session["step"] = "attendance"
+            send_buttons(
+                phone,
+                f"Bonjour ! 👋 Content de vous revoir, *{VENDOR_MEMORY[phone]}* !\n\n"
+                f"Êtes-vous en train de vendre *aujourd'hui* ?",
+                PRESENCE_BUTTONS
+            )
+            return None, None
+
         session["step"] = "attendance"
-        return (
+        send_message(
+            phone,
             "Merci ! 😊\n\n"
-            "Veuillez entrer votre *ID Vendeur* ou votre *numéro de téléphone*.\n"
-            "_(exemple : V-0042 ou 90123456)_"
-        ), None
+            "Veuillez entrer votre *ID Vendeur*.\n"
+            "_(exemple : V-0042)_"
+        )
+        return None, None
 
     # ── ÉTAPE 2 : Présence ────────────────────────────────────────────────────
     if step == "attendance":
-        data["vendor_id"] = body
-        session["step"]   = "issue"
-        return (
-            f"Bonjour ! 👋\n\n"
-            f"Êtes-vous en train de vendre *aujourd'hui* ?\n\n"
-            f"Répondez *1* pour Oui ou *2* pour Non."
-        ), None
+        if "vendor_id" not in data:
+            data["vendor_id"] = body
+            VENDOR_MEMORY[phone] = body
+            send_buttons(
+                phone,
+                f"ID enregistré : *{body}* ✅\n\n"
+                "Êtes-vous en train de vendre *aujourd'hui* ?",
+                PRESENCE_BUTTONS
+            )
+            return None, None
 
-    # ── ÉTAPE 3 : Problème (PRIME) ────────────────────────────────────────────
-    if step == "issue":
-        if body == "1":
+        if body in OUI_IDS or body.upper() == "OUI":
             data["attendance"] = "Oui"
-        elif body == "2":
+        elif body in PEUT_IDS or body.upper() == "PEUT-ÊTRE":
+            data["attendance"] = "Peut-être"
+        elif body in NON_IDS or body.upper() == "NON":
             data["attendance"] = "Non"
         else:
-            return "Répondez *1* (Oui, je vends) ou *2* (Non, je ne vends pas) :", None
+            send_buttons(phone, "Êtes-vous en train de vendre *aujourd'hui* ?", PRESENCE_BUTTONS)
+            return None, None
 
-        session["step"] = "comment"
-        return (
-            "Avez-vous un problème aujourd'hui ?\n\n"
-            "1️⃣ Problème Produit\n"
-            "2️⃣ Problème Relation / micro-distributeur\n"
-            "3️⃣ Problème Revenu / paiement\n"
-            "4️⃣ Motivation / formation\n"
-            "5️⃣ Problème Équipement\n"
-            "6️⃣ Aucun problème\n"
-            "0️⃣ Autre\n\n"
-            "Répondez avec le *numéro* correspondant."
-        ), None
+        session["step"] = "issue"
+        _send_issue_list(phone)
+        return None, None
 
-    # ── ÉTAPE 4 : Commentaire ─────────────────────────────────────────────────
-    if step == "comment":
+    # ── ÉTAPE 3 : Problème PRIME ──────────────────────────────────────────────
+    if step == "issue":
         if body not in ISSUE_MAP:
-            return "Répondez avec un numéro entre 0 et 6 :", None
+            _send_issue_list(phone)
+            return None, None
 
         categorie, prime = ISSUE_MAP[body]
         data["categorie"] = categorie
-        data["prime"]     = prime
-        session["step"]   = "done"
+        data["prime"] = prime
+
+        if body == "8":
+            row = _build_row(phone, data, "")
+            reset_session(phone)
+            send_message(phone,
+                "✅ *Parfait, bonne journée de vente !*\n\n"
+                "Votre présence a bien été enregistrée. 🙏\n\n"
+                "*À demain ! 👋*"
+            )
+            return None, row
 
         if body == "6":
-            # Pas de problème → on enregistre directement
-            row = _build_row(phone, data, commentaire="")
+            row = _build_row(phone, data, "Demande prix du jour")
             reset_session(phone)
-            return (
-                "✅ *Merci, votre présence a été enregistrée !*\n\n"
-                "Bonne journée de vente ! 🙏\n\n"
-                "_Envoyez MENU pour accéder au support à tout moment._"
-            ), row
+            send_message(phone,
+                "📋 Demande de confirmation de prix transmise.\n\n"
+                "Notre équipe vous répond rapidement. 🙏\n\n"
+                "*À demain ! 👋*"
+            )
+            return None, row
 
-        return (
+        if body == "7":
+            row = _build_row(phone, data, "Demande support direct")
+            reset_session(phone)
+            send_message(phone,
+                "📞 Un agent vous contactera très prochainement. 🙏\n\n"
+                "*À demain ! 👋*"
+            )
+            return None, row
+
+        session["step"] = "comment"
+        send_buttons(
+            phone,
             f"📝 Vous avez signalé : *{categorie}*\n\n"
-            "Décrivez brièvement votre problème _(optionnel)_ :\n"
-            "_(Envoyez un espace ou un tiret si vous n'avez rien à ajouter)_"
-        ), None
+            "Voulez-vous ajouter un commentaire ?",
+            COMMENT_BUTTONS
+        )
+        return None, None
 
-    # ── ÉTAPE 5 : Fin ─────────────────────────────────────────────────────────
-    if step == "done":
-        commentaire = body if body not in ["-", " ", ""] else ""
-        row = _build_row(phone, data, commentaire=commentaire)
+    # ── ÉTAPE 4 : Commentaire ─────────────────────────────────────────────────
+    if step == "comment":
+        if body in ["comment_non", "➡️ Non, continuer"]:
+            row = _build_row(phone, data, "")
+            reset_session(phone)
+            send_message(phone,
+                "✅ *Merci, votre problème a bien été reçu !*\n\n"
+                "Notre équipe fera un suivi via votre micro-distributeur "
+                "ou superviseur commercial. 🙏\n\n"
+                "*À demain ! 👋*"
+            )
+            return None, row
+        elif body in ["comment_oui", "✍️ Oui, je décris"]:
+            session["step"] = "comment_text"
+            send_message(phone, "Décrivez brièvement votre problème :")
+            return None, None
+        else:
+            # texte libre direct
+            row = _build_row(phone, data, body)
+            reset_session(phone)
+            send_message(phone,
+                "✅ *Merci, votre problème a bien été reçu !*\n\n"
+                "Notre équipe fera un suivi via votre micro-distributeur "
+                "ou superviseur commercial. 🙏\n\n"
+                "*À demain ! 👋*"
+            )
+            return None, row
+
+    # ── ÉTAPE 4b : Texte commentaire ─────────────────────────────────────────
+    if step == "comment_text":
+        row = _build_row(phone, data, body)
         reset_session(phone)
-        return (
+        send_message(phone,
             "✅ *Merci, votre problème a bien été reçu !*\n\n"
-            "Notre équipe l'examinera et fera un suivi via votre "
-            "micro-distributeur ou superviseur commercial. 🙏\n\n"
-            "_Envoyez MENU pour accéder au support à tout moment._"
-        ), row
+            "Notre équipe fera un suivi via votre micro-distributeur "
+            "ou superviseur commercial. 🙏\n\n"
+            "*À demain ! 👋*"
+        )
+        return None, row
 
-    # ── MENU (commande spéciale) ───────────────────────────────────────────────
-    if body.upper() == "MENU":
-        reset_session(phone)
-        return _menu(), None
-
-    # Fallback
     reset_session(phone)
-    return _menu(), None
+    send_message(phone, "Envoyez *MENU* pour accéder au support. 👋")
+    return None, None
 
 
-def _menu() -> str:
-    return (
-        "📋 *Company Vendor Support — Menu*\n\n"
-        "Répondez avec un numéro :\n\n"
-        "1️⃣ J'ai un problème produit\n"
-        "2️⃣ J'ai un problème micro-distributeur\n"
-        "3️⃣ J'ai une question revenu ou paiement\n"
-        "4️⃣ Je veux une formation ou conseils de vente\n"
-        "5️⃣ J'ai un problème d'équipement\n"
-        "6️⃣ Je veux confirmer le prix du jour\n"
-        "7️⃣ Je veux parler au support"
+def _send_issue_list(phone: str):
+    send_list(
+        phone,
+        body="Avez-vous un problème aujourd'hui ?\n\nChoisissez une option 👇",
+        button_label="Voir les options",
+        sections=[{
+            "title": "Catégories PRIME",
+            "rows": [
+                {"id": "1", "title": "Problème Produit",        "description": "Qualité, fraîcheur, disponibilité"},
+                {"id": "2", "title": "Problème Relation",       "description": "Micro-distributeur, superviseur"},
+                {"id": "3", "title": "Revenu / paiement",       "description": "Commission, bonus, marge"},
+                {"id": "4", "title": "Motivation / formation",  "description": "Conseils de vente, formation"},
+                {"id": "5", "title": "Problème Équipement",     "description": "Glacière, tray, vélo, uniforme"},
+                {"id": "6", "title": "Confirmer prix du jour",  "description": "Prix actuels des produits"},
+                {"id": "7", "title": "Parler au support",       "description": "Contacter un agent directement"},
+                {"id": "8", "title": "Aucun problème",          "description": "Tout va bien aujourd'hui"},
+            ]
+        }]
     )
 
 
 def _build_row(phone: str, data: dict, commentaire: str) -> list:
     now = datetime.now()
     return [
-        now.strftime("%d/%m/%Y"),          # Date
-        now.strftime("%H:%M"),             # Heure
-        phone,                             # Téléphone
-        data.get("vendor_id", "—"),        # Vendor ID
-        data.get("attendance", "—"),       # Présence
-        data.get("categorie", "—"),        # Catégorie
-        data.get("prime", ""),             # Pilier PRIME
-        commentaire,                       # Commentaire
-        "WhatsApp QR",                     # Source
+        now.strftime("%d/%m/%Y"),
+        now.strftime("%H:%M"),
+        phone,
+        data.get("vendor_id", "—"),
+        data.get("attendance", "—"),
+        data.get("categorie", "—"),
+        data.get("prime", ""),
+        commentaire,
+        "WhatsApp QR",
     ]
