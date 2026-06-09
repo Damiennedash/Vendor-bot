@@ -28,18 +28,30 @@ def reset_session(phone):
 
 def _parse_qr(body_raw):
    """
-   Parse le message QR. Format: CHECKIN|V-001|Kofi Mensah
-   WhatsApp encode | en %7C et espaces en %20.
+   Parse le message QR. Accepte 2 formats :
+   - Nouveau : CHECKIN|V-001|Kofi Mensah
+   - Ancien  : Bonjour...ID:V-001 NOM:Kofi Mensah
+               ou apres encodage WhatsApp : ID%3AV-001 NOM%3AKofi%20Mensah
    Retourne (vendor_id, nom) ou (None, None).
    """
+   import re
    # Decoder les caracteres URL-encodes
-   text = body_raw.replace("%7C", "|").replace("%7c", "|").replace("%20", " ")
+   text = body_raw.replace("%7C", "|").replace("%7c", "|").replace("%20", " ").replace("%3A", ":").replace("%3a", ":")
+   # Format nouveau : CHECKIN|V-001|Kofi Mensah
    if text.upper().startswith("CHECKIN|"):
        parts = text.split("|")
        if len(parts) >= 3:
            return parts[1].strip(), parts[2].strip()
        elif len(parts) == 2:
            return parts[1].strip(), parts[1].strip()
+   # Format ancien : ...ID:V-001 NOM:Kofi Mensah
+   if "ID:" in text.upper() and ("NOM:" in text.upper() or "ID:" in text.upper()):
+       id_match  = re.search(r"ID:([A-Za-z0-9\-]+)", text, re.IGNORECASE)
+       nom_match = re.search(r"NOM:(.+?)(?:\s*$)", text, re.IGNORECASE)
+       if id_match:
+           vendor_id = id_match.group(1).strip()
+           nom = nom_match.group(1).strip() if nom_match else vendor_id
+           return vendor_id, nom
    return None, None
 
 def handle_message(phone, body):
