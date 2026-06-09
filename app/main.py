@@ -1,10 +1,9 @@
+# -*- coding: utf-8 -*-
 """
-Vendor Daily Check-In — WhatsApp Webhook
+Vendor Daily Check-In - WhatsApp Webhook
 Stack : Flask + WhatsApp Cloud API + Google Sheets
 """
-
-import os
-import logging
+import os, logging
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from .conversation import handle_message
@@ -31,11 +30,11 @@ def index():
 
 @app.route("/webhook", methods=["GET"])
 def verify():
-    mode = request.args.get("hub.mode")
-    token = request.args.get("hub.verify_token")
+    mode      = request.args.get("hub.mode")
+    token     = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
     if mode == "subscribe" and token == VERIFY_TOKEN:
-        logger.info("Webhook vérifié avec succès ✅")
+        logger.info("Webhook verifie OK")
         return challenge, 200
     return "Forbidden", 403
 
@@ -44,48 +43,49 @@ def verify():
 def webhook():
     data = request.get_json(silent=True)
     try:
-        entry = data["entry"][0]
+        entry   = data["entry"][0]
         changes = entry["changes"][0]["value"]
 
-        # Ignorer les notifications de statut (delivered, read…)
+        # Ignorer les notifications de statut
         if "messages" not in changes:
             return jsonify({"status": "ok"}), 200
 
-        message = changes["messages"][0]
-        phone = message["from"]
+        message  = changes["messages"][0]
+        phone    = message["from"]
         msg_type = message.get("type")
 
-        # Texte libre ou réponses interactives
+        # Texte libre
         if msg_type == "text":
             body = message["text"]["body"].strip()
+        # Bouton interactif
         elif msg_type == "interactive":
             itype = message["interactive"].get("type")
             if itype == "button_reply":
-                body = message["interactive"]["button_reply"].get("id", "").strip()
+                body = message["interactive"]["button_reply"]["id"].strip()
             elif itype == "list_reply":
-                body = message["interactive"]["list_reply"].get("id", "").strip()
+                body = message["interactive"]["list_reply"]["id"].strip()
             else:
                 return jsonify({"status": "ok"}), 200
         else:
             return jsonify({"status": "ok"}), 200
 
-        logger.info("Message reçu de %s: %s", phone, body)
+        logger.info("Message recu de {}: {}".format(phone, body))
 
         # Traiter la conversation
         reply, completed_row = handle_message(phone, body)
 
-        # Envoyer la réponse si nécessaire
+        # Envoyer la reponse seulement si elle existe
         if reply:
             from .whatsapp import send_message
             send_message(phone, reply)
 
-        # Écrire dans Google Sheets si flow terminé
+        # Ecrire dans Google Sheets si flow termine
         if completed_row:
             append_row(completed_row)
-            logger.info("Ligne enregistrée dans Sheets pour %s", phone)
+            logger.info("Ligne enregistree dans Sheets pour {}".format(phone))
 
     except Exception as e:
-        logger.error("Erreur webhook: %s", e, exc_info=True)
+        logger.error("Erreur webhook: {}".format(e), exc_info=True)
 
     return jsonify({"status": "ok"}), 200
 
