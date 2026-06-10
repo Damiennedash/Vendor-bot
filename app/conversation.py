@@ -241,33 +241,13 @@ def handle_message(phone, body):
 
         if body_raw in ["1", "2"]:
 
-            # Oui sous toutes ses formes
-
-            data["vente_aujourd_hui"] = "Oui" if body_raw == "1" else "En cours"
-
             session["step"] = "ventes_montant"
 
-            # Vérifier si on a déjà les ventes d'hier en mémoire (même jour ?)
+            if body_raw == "1":
 
-            mem = VENDOR_MEMORY.get(phone, {})
+                # "Je vais vendre" → pas encore vendu → on demande les ventes HIER
 
-            last_date = mem.get("last_date", "")
-
-            if _matin() and last_date == _today():
-
-                # Déjà déclaré aujourd'hui → skip ventes hier, aller aux pièces
-
-                session["step"] = "ventes_pieces"
-
-                return (
-
-                    "Combien de *pièces Fan* avez-vous vendues *hier* ?\n"
-
-                    "_(Uniquement un chiffre, ex : 12)_"
-
-                ), None
-
-            if _matin():
+                data["vente_aujourd_hui"] = "Je vais vendre"
 
                 return (
 
@@ -278,6 +258,10 @@ def handle_message(phone, body):
                 ), None
 
             else:
+
+                # "J'ai déjà vendu" → a vendu aujourd'hui → on demande les ventes AUJOURD'HUI
+
+                data["vente_aujourd_hui"] = "J'ai déjà vendu"
 
                 return (
 
@@ -331,7 +315,7 @@ def handle_message(phone, body):
 
         session["step"] = "ventes_pieces"
 
-        if _matin():
+        if data.get("vente_aujourd_hui") == "Je vais vendre":
 
             return (
 
