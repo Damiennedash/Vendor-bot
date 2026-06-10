@@ -345,7 +345,7 @@ def handle_message(phone, body):
 
         data["ventes_pieces"] = body_raw
 
-        # Mémoriser les ventes avec la date du jour
+        # Mémoriser les ventes avec la date du jour → ne plus redemander
 
         if phone not in VENDOR_MEMORY:
 
@@ -355,7 +355,7 @@ def handle_message(phone, body):
 
         VENDOR_MEMORY[phone]["last_pieces"]  = body_raw
 
-        VENDOR_MEMORY[phone]["last_date"]    = _today()
+        VENDOR_MEMORY[phone]["last_date"]    = _today()  # clé importante !
 
         session["step"] = "probleme"
 
