@@ -26,7 +26,9 @@ ISSUE_MAP = {
 
 SESSIONS = {}
 
-# Mémoire permanente : { phone: {"nom": ..., "depot": ...} }
+# Mémoire permanente par numéro de téléphone
+
+# { phone: { "nom": ..., "depot": ..., "last_montant": ..., "last_pieces": ..., "last_date": ... } }
 
 VENDOR_MEMORY = {}
 
@@ -51,6 +53,11 @@ def _matin():
 def _salutation():
 
     return "Bonjour" if _matin() else "Bonsoir"
+
+
+def _today():
+
+    return datetime.now().strftime("%d/%m/%Y")
 
 
 def _au_revoir(nom):
@@ -82,9 +89,24 @@ def _au_revoir(nom):
 
 def _is_nombre(text):
 
-    cleaned = text.replace(" ", "").replace(",", "").replace(".", "")
+    return text.replace(" ", "").replace(",", "").replace(".", "").isdigit()
 
-    return cleaned.isdigit()
+
+def _question_vente():
+
+    """Question de vente universelle."""
+
+    return (
+
+        "Concernant vos ventes *aujourd'hui* :\n\n"
+
+        "1 - Je vais vendre\n"
+
+        "2 - J'ai déjà vendu\n"
+
+        "3 - Je ne vends pas aujourd'hui"
+
+    )
 
 
 def get_session(phone):
@@ -127,13 +149,15 @@ def handle_message(phone, body):
 
     if step == "start":
 
-        # Vendor déjà connu → on saute nom et dépôt
+        mem = VENDOR_MEMORY.get(phone)
 
-        if phone in VENDOR_MEMORY:
+        if mem:
 
-            nom   = VENDOR_MEMORY[phone]["nom"]
+            # Vendor connu → saluer et poser la question de vente directement
 
-            depot = VENDOR_MEMORY[phone]["depot"]
+            nom   = mem["nom"]
+
+            depot = mem["depot"]
 
             data["nom"]   = nom
 
@@ -141,41 +165,17 @@ def handle_message(phone, body):
 
             session["step"] = "vente_aujourd_hui"
 
-            if _matin():
+            return (
 
-                return (
+                "{} Champion *{}* ! 🏆\n\n"
 
-                    "{} Champion *{}* ! 🏆\n\n"
+                "Dépôt : *{}*\n\n"
 
-                    "Dépôt : *{}*\n\n"
+                "{}"
 
-                    "Vendez-vous *aujourd'hui* ?\n\n"
+            ).format(_salutation(), nom, depot, _question_vente()), None
 
-                    "1 - Oui, je vends\n"
-
-                    "2 - Peut-être\n"
-
-                    "3 - Non, je ne vends pas"
-
-                ).format(_salutation(), nom, depot), None
-
-            else:
-
-                return (
-
-                    "{} Champion *{}* ! 🏆\n\n"
-
-                    "Dépôt : *{}*\n\n"
-
-                    "Avez-vous vendu *aujourd'hui* ?\n\n"
-
-                    "1 - Oui\n"
-
-                    "2 - Non"
-
-                ).format(_salutation(), nom, depot), None
-
-        # Nouveau vendor → demander le nom
+        # Nouveau vendor
 
         session["step"] = "nom"
 
@@ -183,9 +183,7 @@ def handle_message(phone, body):
 
             "{} Champion ! Bienvenue sur *{}* Vendor Support. 🏆\n\n"
 
-            "Pour enregistrer votre déclaration du jour,\n"
-
-            "veuillez entrer votre *nom complet*."
+            "Veuillez entrer votre *nom complet*."
 
         ).format(_salutation(), BRAND), None
 
@@ -219,89 +217,57 @@ def handle_message(phone, body):
 
         data["depot"] = body_raw
 
-        # Mémoriser nom + dépôt définitivement
+        # Mémoriser nom + dépôt
 
-        VENDOR_MEMORY[phone] = {
+        if phone not in VENDOR_MEMORY:
 
-            "nom":   data["nom"],
+            VENDOR_MEMORY[phone] = {}
 
-            "depot": body_raw
+        VENDOR_MEMORY[phone]["nom"]   = data["nom"]
 
-        }
+        VENDOR_MEMORY[phone]["depot"] = body_raw
 
         session["step"] = "vente_aujourd_hui"
 
-        if _matin():
+        return (
 
-            return (
+            "Dépôt enregistré : *{}* ✅\n\n{}"
 
-                "Dépôt enregistré : *{}* ✅\n\n"
-
-                "Vendez-vous *aujourd'hui* ?\n\n"
-
-                "1 - Oui, je vends\n"
-
-                "2 - Peut-être\n"
-
-                "3 - Non, je ne vends pas"
-
-            ).format(body_raw), None
-
-        else:
-
-            return (
-
-                "Dépôt enregistré : *{}* ✅\n\n"
-
-                "Avez-vous vendu *aujourd'hui* ?\n\n"
-
-                "1 - Oui\n"
-
-                "2 - Non"
-
-            ).format(body_raw), None
+        ).format(body_raw, _question_vente()), None
 
     # ── ÉTAPE 3 : Vente aujourd'hui ───────────────────────────────────────────
 
     if step == "vente_aujourd_hui":
 
-        if _matin():
+        if body_raw in ["1", "2"]:
 
-            if body_raw in ["1", "oui"]:
+            # Oui sous toutes ses formes
 
-                data["vente_aujourd_hui"] = "Oui"
+            data["vente_aujourd_hui"] = "Oui" if body_raw == "1" else "En cours"
 
-                session["step"] = "ventes_montant"
+            session["step"] = "ventes_montant"
 
-                return (
+            # Vérifier si on a déjà les ventes d'hier en mémoire (même jour ?)
 
-                    "Combien avez-vous vendu *hier* en FCFA ?\n"
+            mem = VENDOR_MEMORY.get(phone, {})
 
-                    "_(Ex : 45000)_"
+            last_date = mem.get("last_date", "")
 
-                ), None
+            if _matin() and last_date == _today():
 
-            elif body_raw in ["2", "peut-etre", "peut-être"]:
+                # Déjà déclaré aujourd'hui → skip ventes hier, aller aux pièces
 
-                data["vente_aujourd_hui"] = "Peut-être"
-
-                session["step"] = "ventes_montant"
+                session["step"] = "ventes_pieces"
 
                 return (
 
-                    "Combien avez-vous vendu *hier* en FCFA ?\n"
+                    "Combien de *pièces Fan* avez-vous vendues *hier* ?\n"
 
-                    "_(Ex : 45000)_"
+                    "_(Uniquement un chiffre, ex : 12)_"
 
                 ), None
 
-            elif body_raw in ["3", "non"]:
-
-                data["vente_aujourd_hui"] = "Non"
-
-                # Matin Non → ventes hier directement
-
-                session["step"] = "ventes_montant"
+            if _matin():
 
                 return (
 
@@ -312,28 +278,6 @@ def handle_message(phone, body):
                 ), None
 
             else:
-
-                return (
-
-                    "Répondez :\n"
-
-                    "1 - Oui, je vends\n"
-
-                    "2 - Peut-être\n"
-
-                    "3 - Non, je ne vends pas"
-
-                ), None
-
-        else:
-
-            # SOIR
-
-            if body_raw in ["1", "oui"]:
-
-                data["vente_aujourd_hui"] = "Oui"
-
-                session["step"] = "ventes_montant"
 
                 return (
 
@@ -343,21 +287,39 @@ def handle_message(phone, body):
 
                 ), None
 
-            elif body_raw in ["2", "non"]:
+        elif body_raw == "3":
 
-                data["vente_aujourd_hui"] = "Non"
+            # Non
 
-                # SOIR + Non → directement problèmes
+            data["vente_aujourd_hui"] = "Non"
 
-                session["step"] = "probleme"
+            if _matin():
 
-                return _menu_soir(), None
+                # Matin Non → ventes hier quand même
+
+                session["step"] = "ventes_montant"
+
+                return (
+
+                    "Combien avez-vous vendu *hier* en FCFA ?\n"
+
+                    "_(Ex : 45000)_"
+
+                ), None
 
             else:
 
-                return "Répondez :\n1 - Oui\n2 - Non", None
+                # Soir Non → directement problèmes
 
-    # ── ÉTAPE 4 : Montant FCFA (uniquement si Oui ou Peut-être) ──────────────
+                session["step"] = "probleme"
+
+                return _menu_probleme(), None
+
+        else:
+
+            return _question_vente(), None
+
+    # ── ÉTAPE 4 : Montant FCFA ────────────────────────────────────────────────
 
     if step == "ventes_montant":
 
@@ -399,9 +361,21 @@ def handle_message(phone, body):
 
         data["ventes_pieces"] = body_raw
 
+        # Mémoriser les ventes avec la date du jour
+
+        if phone not in VENDOR_MEMORY:
+
+            VENDOR_MEMORY[phone] = {}
+
+        VENDOR_MEMORY[phone]["last_montant"] = data.get("ventes_montant", "0")
+
+        VENDOR_MEMORY[phone]["last_pieces"]  = body_raw
+
+        VENDOR_MEMORY[phone]["last_date"]    = _today()
+
         session["step"] = "probleme"
 
-        return _menu_matin() if _matin() else _menu_soir(), None
+        return _menu_probleme(), None
 
     # ── ÉTAPE 6 : Problème PRIME ──────────────────────────────────────────────
 
@@ -409,7 +383,7 @@ def handle_message(phone, body):
 
         if body_raw not in ISSUE_MAP:
 
-            return _menu_matin() if _matin() else _menu_soir(), None
+            return _menu_probleme(), None
 
         categorie, prime = ISSUE_MAP[body_raw]
 
@@ -433,13 +407,7 @@ def handle_message(phone, body):
 
             reset_session(phone)
 
-            return (
-
-                "Votre demande de prix a été transmise. 🙏\n\n" +
-
-                _au_revoir(nom)
-
-            ), row
+            return "Votre demande de prix a été transmise. 🙏\n\n" + _au_revoir(nom), row
 
         if body_raw == "7":
 
@@ -447,13 +415,7 @@ def handle_message(phone, body):
 
             reset_session(phone)
 
-            return (
-
-                "Un agent vous contactera très prochainement. 🙏\n\n" +
-
-                _au_revoir(nom)
-
-            ), row
+            return "Un agent vous contactera très prochainement. 🙏\n\n" + _au_revoir(nom), row
 
         session["step"] = "commentaire"
 
@@ -497,69 +459,64 @@ def handle_message(phone, body):
 
     session = get_session(phone)
 
-    session["step"] = "nom" if phone not in VENDOR_MEMORY else "vente_aujourd_hui"
+    session["step"] = "start"
 
-    return (
-
-        "{} Champion ! Bienvenue sur *{}* Vendor Support. 🏆\n\n"
-
-        "Veuillez entrer votre *nom complet*."
-
-    ).format(_salutation(), BRAND), None
+    return handle_message(phone, body), None
 
 
-def _menu_matin():
+def _menu_probleme():
 
-    return (
+    if _matin():
 
-        "Avez-vous un problème pour atteindre vos objectifs *aujourd'hui* ?\n\n"
+        return (
 
-        "1 - J'ai un problème produit\n"
+            "Avez-vous un problème pour atteindre vos objectifs *aujourd'hui* ?\n\n"
 
-        "2 - J'ai un problème micro-distributeur / relation\n"
+            "1 - J'ai un problème produit\n"
 
-        "3 - J'ai une question revenu ou paiement\n"
+            "2 - J'ai un problème micro-distributeur / relation\n"
 
-        "4 - J'ai besoin d'une formation ou de conseils de vente\n"
+            "3 - J'ai une question revenu ou paiement\n"
 
-        "5 - J'ai un problème d'équipement\n"
+            "4 - J'ai besoin d'une formation ou de conseils de vente\n"
 
-        "6 - Je veux confirmer le prix du jour\n"
+            "5 - J'ai un problème d'équipement\n"
 
-        "7 - Je veux parler au support\n"
+            "6 - Je veux confirmer le prix du jour\n"
 
-        "8 - Aucun problème\n\n"
+            "7 - Je veux parler au support\n"
 
-        "Répondez avec le *numéro* correspondant."
+            "8 - Aucun problème\n\n"
 
-    )
+            "Répondez avec le *numéro* correspondant."
 
+        )
 
-def _menu_soir():
+    else:
 
-    return (
+        return (
 
-        "Avez-vous rencontré un problème *au cours de la journée* ?\n\n"
+            "Avez-vous rencontré un problème *au cours de la journée* ?\n\n"
 
-        "1 - Problème Produit\n"
+            "1 - Problème Produit\n"
 
-        "2 - Problème Relation / micro-distributeur\n"
+            "2 - Problème Relation / micro-distributeur\n"
 
-        "3 - Problème Revenu / paiement\n"
+            "3 - Problème Revenu / paiement\n"
 
-        "4 - Besoin de formation ou conseils de vente\n"
+            "4 - Besoin de formation ou conseils de vente\n"
 
-        "5 - Problème Équipement\n"
+            "5 - Problème Équipement\n"
 
-        "6 - Confirmer le prix du jour\n"
+            "6 - Confirmer le prix du jour\n"
 
-        "7 - Parler au support\n"
+            "7 - Parler au support\n"
 
-        "8 - Aucun problème\n\n"
+            "8 - Aucun problème\n\n"
 
-        "Répondez avec le *numéro* correspondant."
+            "Répondez avec le *numéro* correspondant."
 
-    )
+        )
 
 
 def _build_row(phone, data, commentaire):
@@ -583,8 +540,6 @@ def _build_row(phone, data, commentaire):
         data.get("depot", "-"),
 
         data.get("vente_aujourd_hui", "-"),
-
-        data.get("raison_non_vente", ""),
 
         data.get("ventes_montant", "0"),
 
