@@ -6,21 +6,21 @@ BRAND = "FANMILK TOGO"
 
 ISSUE_MAP = {
 
-    "1": ("Problème Produit",                   "Product"),
+    "1": ("Problème Produit",                  "Product"),
 
-    "2": ("Problème Relation / micro-distrib",  "Relationship"),
+    "2": ("Problème Relation / micro-distrib", "Relationship"),
 
-    "3": ("Problème Revenu / paiement",         "Income"),
+    "3": ("Problème Revenu / paiement",        "Income"),
 
-    "4": ("Motivation / formation",             "Motivation"),
+    "4": ("Motivation / formation",            "Motivation"),
 
-    "5": ("Problème Équipement",                "Equipment"),
+    "5": ("Problème Équipement",               "Equipment"),
 
-    "6": ("Confirmation prix du jour",          ""),
+    "6": ("Confirmation prix du jour",         ""),
 
-    "7": ("Demande support direct",             ""),
+    "7": ("Demande support direct",            ""),
 
-    "8": ("Aucun problème",                     ""),
+    "8": ("Aucun problème",                    ""),
 
 }
 
@@ -30,21 +30,18 @@ MOTS_INVALIDES = [
 
     "oui", "non", "ok", "yes", "no", "menu", "bonjour", "bonsoir",
 
-    "salut", "allo", "peut-etre", "1", "2", "3", "4", "5", "6", "7", "8",
+    "salut", "allo", "peut-etre", "peut-être",
 
-    "bonjour fanmilk togo", "bonsoir fanmilk togo",
+    "1", "2", "3", "4", "5", "6", "7", "8",
+
+    "bonjour fanmilk togo", "bonsoir fanmilk togo", "fanmilk",
 
 ]
 
 
-def _heure():
-
-    return datetime.now().hour
-
-
 def _matin():
 
-    return _heure() < 13
+    return datetime.now().hour < 13
 
 
 def _salutation():
@@ -56,11 +53,36 @@ def _au_revoir(nom):
 
     if _matin():
 
-        return "Bonne vente *{}* ! 💪\n\nVotre déclaration a bien été enregistrée.\n\nÀ tout à l'heure !".format(nom)
+        return (
+
+            "Bonne vente *{}* ! 💪\n\n"
+
+            "Votre déclaration a bien été enregistrée.\n\n"
+
+            "À tout à l'heure !"
+
+        ).format(nom)
 
     else:
 
-        return "Bonne soirée *{}* ! 🌙\n\nVotre déclaration a bien été enregistrée.\n\n*À demain !*".format(nom)
+        return (
+
+            "Bonne soirée *{}* ! 🌙\n\n"
+
+            "Votre déclaration a bien été enregistrée.\n\n"
+
+            "*À demain !*"
+
+        ).format(nom)
+
+
+def _is_nombre(text):
+
+    """Vérifie que le texte est un nombre valide."""
+
+    cleaned = text.replace(" ", "").replace(",", "").replace(".", "")
+
+    return cleaned.isdigit()
 
 
 def get_session(phone):
@@ -101,7 +123,7 @@ def handle_message(phone, body):
 
         data = session["data"]
 
-    # ── DÉCLENCHEUR : premier message ou scan QR ──────────────────────────────
+    # ── DÉCLENCHEUR ───────────────────────────────────────────────────────────
 
     if step == "start":
 
@@ -143,57 +165,21 @@ def handle_message(phone, body):
 
         if len(body_raw) < 2:
 
-            return "Veuillez entrer le nom de votre *dépôt*.", None
+            return "Veuillez entrer le nom de votre *dépôt* s'il vous plaît.", None
 
         data["depot"] = body_raw
 
         session["step"] = "vente_aujourd_hui"
 
-        return (
+        if _matin():
 
-            "Dépôt enregistré : *{}* ✅\n\n"
-
-            "Vendez-vous *aujourd'hui* ?\n\n"
-
-            "1 - Oui, je vends\n"
-
-            "2 - Peut-être\n"
-
-            "3 - Non, je ne vends pas"
-
-        ).format(body_raw), None
-
-    # ── ÉTAPE 3 : Vente aujourd'hui ───────────────────────────────────────────
-
-    if step == "vente_aujourd_hui":
-
-        if body_raw in ["1", "oui"]:
-
-            data["vente_aujourd_hui"] = "Oui"
-
-        elif body_raw in ["2", "peut-etre", "peut être", "peutetre"]:
-
-            data["vente_aujourd_hui"] = "Peut-être"
-
-        elif body_raw in ["3", "non"]:
-
-            data["vente_aujourd_hui"] = "Non"
-
-            session["step"] = "raison_non_vente"
+            # MATIN : Vendez-vous aujourd'hui ? (Oui / Peut-être / Non)
 
             return (
 
-                "Pourquoi ne vendez-vous pas aujourd'hui ?\n"
+                "Dépôt enregistré : *{}* ✅\n\n"
 
-                "_(Décrivez brièvement la raison)_"
-
-            ), None
-
-        else:
-
-            return (
-
-                "Répondez avec le numéro :\n\n"
+                "Vendez-vous *aujourd'hui* ?\n\n"
 
                 "1 - Oui, je vends\n"
 
@@ -201,67 +187,165 @@ def handle_message(phone, body):
 
                 "3 - Non, je ne vends pas"
 
-            ), None
-
-        # Oui ou Peut-être → ventes hier (montant)
-
-        session["step"] = "ventes_hier_montant"
-
-        if _matin():
-
-            return (
-
-                "Combien avez-vous vendu *hier* en FCFA ?\n"
-
-                "_(Ex : 45000)_"
-
-            ), None
+            ).format(body_raw), None
 
         else:
 
+            # SOIR : Avez-vous vendu aujourd'hui ? (Oui / Non uniquement)
+
             return (
 
-                "Combien avez-vous vendu *aujourd'hui* en FCFA ?\n"
+                "Dépôt enregistré : *{}* ✅\n\n"
 
-                "_(Ex : 45000)_"
+                "Avez-vous vendu *aujourd'hui* ?\n\n"
 
-            ), None
+                "1 - Oui\n"
 
-    # ── ÉTAPE 3b : Raison non-vente ───────────────────────────────────────────
+                "2 - Non"
+
+            ).format(body_raw), None
+
+    # ── ÉTAPE 3 : Vente aujourd'hui ───────────────────────────────────────────
+
+    if step == "vente_aujourd_hui":
+
+        if _matin():
+
+            # MATIN : 3 options
+
+            if body_raw in ["1", "oui"]:
+
+                data["vente_aujourd_hui"] = "Oui"
+
+                session["step"] = "ventes_montant"
+
+                return (
+
+                    "Combien avez-vous vendu *hier* en FCFA ?\n"
+
+                    "_(Ex : 45000)_"
+
+                ), None
+
+            elif body_raw in ["2", "peut-etre", "peut-être"]:
+
+                data["vente_aujourd_hui"] = "Peut-être"
+
+                session["step"] = "ventes_montant"
+
+                return (
+
+                    "Combien avez-vous vendu *hier* en FCFA ?\n"
+
+                    "_(Ex : 45000)_"
+
+                ), None
+
+            elif body_raw in ["3", "non"]:
+
+                data["vente_aujourd_hui"] = "Non"
+
+                session["step"] = "raison_non_vente"
+
+                return (
+
+                    "Pourquoi ne vendez-vous pas aujourd'hui ?\n"
+
+                    "_(Décrivez brièvement la raison)_"
+
+                ), None
+
+            else:
+
+                return (
+
+                    "Répondez avec le numéro :\n\n"
+
+                    "1 - Oui, je vends\n"
+
+                    "2 - Peut-être\n"
+
+                    "3 - Non, je ne vends pas"
+
+                ), None
+
+        else:
+
+            # SOIR : 2 options uniquement
+
+            if body_raw in ["1", "oui"]:
+
+                data["vente_aujourd_hui"] = "Oui"
+
+                session["step"] = "ventes_montant"
+
+                return (
+
+                    "Combien avez-vous vendu *aujourd'hui* en FCFA ?\n"
+
+                    "_(Ex : 45000)_"
+
+                ), None
+
+            elif body_raw in ["2", "non"]:
+
+                data["vente_aujourd_hui"] = "Non"
+
+                session["step"] = "ventes_montant"
+
+                return (
+
+                    "Combien avez-vous vendu *aujourd'hui* en FCFA ?\n"
+
+                    "_(Entrez 0 si vous n'avez rien vendu)_"
+
+                ), None
+
+            else:
+
+                return (
+
+                    "Répondez avec le numéro :\n\n"
+
+                    "1 - Oui\n"
+
+                    "2 - Non"
+
+                ), None
+
+    # ── ÉTAPE 3b : Raison non-vente MATIN ────────────────────────────────────
 
     if step == "raison_non_vente":
 
         data["raison_non_vente"] = body_raw
 
-        session["step"] = "ventes_hier_montant"
+        session["step"] = "ventes_montant"
 
-        if _matin():
+        return (
+
+            "Combien avez-vous vendu *hier* en FCFA ?\n"
+
+            "_(Ex : 45000)_"
+
+        ), None
+
+    # ── ÉTAPE 4 : Montant FCFA ────────────────────────────────────────────────
+
+    if step == "ventes_montant":
+
+        if not _is_nombre(body_raw):
 
             return (
 
-                "Compris. Combien avez-vous vendu *hier* en FCFA ?\n"
+                "Veuillez entrer un *nombre valide* en FCFA.\n"
 
                 "_(Ex : 45000)_"
 
             ), None
-
-        else:
-
-            return (
-
-                "Compris. Combien avez-vous vendu *aujourd'hui* en FCFA ?\n"
-
-                "_(Ex : 45000)_"
-
-            ), None
-
-    # ── ÉTAPE 4 : Ventes montant FCFA ─────────────────────────────────────────
-
-    if step == "ventes_hier_montant":
 
         data["ventes_montant"] = body_raw
 
-        session["step"] = "ventes_hier_pieces"
+        session["step"] = "ventes_pieces"
 
         if _matin():
 
@@ -269,7 +353,7 @@ def handle_message(phone, body):
 
                 "Combien de *pièces Fan* avez-vous vendues *hier* ?\n"
 
-                "_(Ex : 12)_"
+                "_(Entrez uniquement un chiffre, ex : 12)_"
 
             ), None
 
@@ -279,19 +363,35 @@ def handle_message(phone, body):
 
                 "Combien de *pièces Fan* avez-vous vendues *aujourd'hui* ?\n"
 
-                "_(Ex : 12)_"
+                "_(Entrez uniquement un chiffre, ex : 12)_"
 
             ), None
 
-    # ── ÉTAPE 5 : Ventes pièces Fan ───────────────────────────────────────────
+    # ── ÉTAPE 5 : Pièces Fan (chiffres uniquement) ────────────────────────────
 
-    if step == "ventes_hier_pieces":
+    if step == "ventes_pieces":
+
+        if not body_raw.isdigit():
+
+            return (
+
+                "Veuillez entrer *uniquement un chiffre*.\n"
+
+                "_(Ex : 12)_"
+
+            ), None
 
         data["ventes_pieces"] = body_raw
 
         session["step"] = "probleme"
 
-        return _menu_text(), None
+        if _matin():
+
+            return _menu_matin(), None
+
+        else:
+
+            return _menu_soir(), None
 
     # ── ÉTAPE 6 : Problème PRIME ──────────────────────────────────────────────
 
@@ -299,7 +399,7 @@ def handle_message(phone, body):
 
         if body_raw not in ISSUE_MAP:
 
-            return _menu_text(), None
+            return _menu_matin() if _matin() else _menu_soir(), None
 
         categorie, prime = ISSUE_MAP[body_raw]
 
@@ -309,7 +409,23 @@ def handle_message(phone, body):
 
         nom = data.get("nom", "")
 
+        # Options sans commentaire
+
         if body_raw == "8":
+
+            # SOIR + Non → demander pourquoi pas vendu à la fin
+
+            if not _matin() and data.get("vente_aujourd_hui") == "Non":
+
+                session["step"] = "raison_non_vente_soir"
+
+                return (
+
+                    "Dernière question : pourquoi n'avez-vous pas vendu aujourd'hui ?\n"
+
+                    "_(Décrivez brièvement la raison)_"
+
+                ), None
 
             row = _build_row(phone, data, "")
 
@@ -327,9 +443,11 @@ def handle_message(phone, body):
 
                 "Votre demande de confirmation de prix a été transmise.\n\n"
 
-                "Notre équipe vous répond rapidement. 🙏\n\n"
+                "Notre équipe vous répond rapidement. 🙏\n\n" +
 
-            ) + _au_revoir(nom), row
+                _au_revoir(nom)
+
+            ), row
 
         if body_raw == "7":
 
@@ -339,9 +457,11 @@ def handle_message(phone, body):
 
             return (
 
-                "Un agent vous contactera très prochainement. 🙏\n\n"
+                "Un agent vous contactera très prochainement. 🙏\n\n" +
 
-            ) + _au_revoir(nom), row
+                _au_revoir(nom)
+
+            ), row
 
         session["step"] = "commentaire"
 
@@ -355,6 +475,20 @@ def handle_message(phone, body):
 
         ).format(categorie), None
 
+    # ── ÉTAPE 6b : Raison non-vente SOIR (après problèmes) ───────────────────
+
+    if step == "raison_non_vente_soir":
+
+        data["raison_non_vente"] = body_raw
+
+        nom = data.get("nom", "")
+
+        row = _build_row(phone, data, "")
+
+        reset_session(phone)
+
+        return _au_revoir(nom), row
+
     # ── ÉTAPE 7 : Commentaire ─────────────────────────────────────────────────
 
     if step == "commentaire":
@@ -362,6 +496,22 @@ def handle_message(phone, body):
         commentaire = "" if body_raw in ["-", ".", " "] else body_raw
 
         nom = data.get("nom", "")
+
+        data["commentaire_tmp"] = commentaire
+
+        # SOIR + Non → demander pourquoi pas vendu après le commentaire
+
+        if not _matin() and data.get("vente_aujourd_hui") == "Non":
+
+            session["step"] = "raison_non_vente_soir"
+
+            return (
+
+                "Dernière question : pourquoi n'avez-vous pas vendu aujourd'hui ?\n"
+
+                "_(Décrivez brièvement la raison)_"
+
+            ), None
 
         row = _build_row(phone, data, commentaire)
 
@@ -373,9 +523,11 @@ def handle_message(phone, body):
 
             "Notre équipe fera un suivi via votre micro-distributeur "
 
-            "ou superviseur commercial.\n\n"
+            "ou superviseur commercial.\n\n" +
 
-        ) + _au_revoir(nom), row
+            _au_revoir(nom)
+
+        ), row
 
     # Fallback
 
@@ -394,11 +546,11 @@ def handle_message(phone, body):
     ).format(_salutation(), BRAND), None
 
 
-def _menu_text():
+def _menu_matin():
 
     return (
 
-        "Avez-vous un problème pour atteindre vos objectifs aujourd'hui ?\n\n"
+        "Avez-vous un problème pour atteindre vos objectifs *aujourd'hui* ?\n\n"
 
         "1 - J'ai un problème produit\n"
 
@@ -421,11 +573,44 @@ def _menu_text():
     )
 
 
+def _menu_soir():
+
+    return (
+
+        "Avez-vous rencontré un problème *au cours de la journée* ?\n\n"
+
+        "1 - Problème Produit\n"
+
+        "2 - Problème Relation / micro-distributeur\n"
+
+        "3 - Problème Revenu / paiement\n"
+
+        "4 - Besoin de formation ou conseils de vente\n"
+
+        "5 - Problème Équipement\n"
+
+        "6 - Confirmer le prix du jour\n"
+
+        "7 - Parler au support\n"
+
+        "8 - Aucun problème\n\n"
+
+        "Répondez avec le *numéro* correspondant."
+
+    )
+
+
 def _build_row(phone, data, commentaire):
 
     now = datetime.now()
 
     periode = "Matin" if now.hour < 13 else "Soir"
+
+    # Récupérer commentaire temporaire si existant
+
+    if not commentaire and data.get("commentaire_tmp"):
+
+        commentaire = data.get("commentaire_tmp", "")
 
     return [
 
