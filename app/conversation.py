@@ -26,11 +26,25 @@ ISSUE_MAP = {
 
 SESSIONS = {}
 
-# Mémoire permanente par numéro de téléphone
+# Mémoire chargée depuis Google Sheets au démarrage
 
-# { phone: { "nom": ..., "depot": ..., "last_montant": ..., "last_pieces": ..., "last_date": ... } }
+# Rechargée automatiquement si vide (après redémarrage)
+
+from .sheets import load_vendor_memory, save_vendor, update_vendor_sales
 
 VENDOR_MEMORY = {}
+
+def _get_memory():
+
+    """Retourne la mémoire, la recharge si vide."""
+
+    global VENDOR_MEMORY
+
+    if not VENDOR_MEMORY:
+
+        VENDOR_MEMORY = load_vendor_memory()
+
+    return VENDOR_MEMORY
 
 MOTS_INVALIDES = [
 
@@ -149,7 +163,7 @@ def handle_message(phone, body):
 
     if step == "start":
 
-        mem = VENDOR_MEMORY.get(phone)
+        mem = _get_memory().get(phone)
 
         if mem:
 
@@ -217,15 +231,19 @@ def handle_message(phone, body):
 
         data["depot"] = body_raw
 
-        # Mémoriser nom + dépôt
+        # Mémoriser nom + dépôt dans Google Sheets (persistant)
 
-        if phone not in VENDOR_MEMORY:
+        mem = _get_memory()
 
-            VENDOR_MEMORY[phone] = {}
+        if phone not in mem:
 
-        VENDOR_MEMORY[phone]["nom"]   = data["nom"]
+            mem[phone] = {}
 
-        VENDOR_MEMORY[phone]["depot"] = body_raw
+        mem[phone]["nom"]   = data["nom"]
+
+        mem[phone]["depot"] = body_raw
+
+        save_vendor(phone, data["nom"], body_raw)
 
         session["step"] = "vente_aujourd_hui"
 
@@ -345,17 +363,21 @@ def handle_message(phone, body):
 
         data["ventes_pieces"] = body_raw
 
-        # Mémoriser les ventes avec la date du jour → ne plus redemander
+        # Mémoriser les ventes dans Google Sheets
 
-        if phone not in VENDOR_MEMORY:
+        mem = _get_memory()
 
-            VENDOR_MEMORY[phone] = {}
+        if phone not in mem:
 
-        VENDOR_MEMORY[phone]["last_montant"] = data.get("ventes_montant", "0")
+            mem[phone] = {}
 
-        VENDOR_MEMORY[phone]["last_pieces"]  = body_raw
+        mem[phone]["last_montant"] = data.get("ventes_montant", "0")
 
-        VENDOR_MEMORY[phone]["last_date"]    = _today()  # clé importante !
+        mem[phone]["last_pieces"]  = body_raw
+
+        mem[phone]["last_date"]    = _today()
+
+        update_vendor_sales(phone, data.get("ventes_montant","0"), body_raw, _today())
 
         session["step"] = "probleme"
 
