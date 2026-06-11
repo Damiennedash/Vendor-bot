@@ -19,7 +19,28 @@ ISSUE_MAP = {
     "7": ("Aucun probleme", ""),
 }
 
-SESSIONS = {}
+import json
+import os
+
+_SESSIONS_FILE = "/tmp/sessions.json"
+
+def _load_sessions():
+    try:
+        if os.path.exists(_SESSIONS_FILE):
+            with open(_SESSIONS_FILE, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def _save_sessions(sessions):
+    try:
+        with open(_SESSIONS_FILE, "w") as f:
+            json.dump(sessions, f)
+    except Exception:
+        pass
+
+SESSIONS = _load_sessions()
 
 from .sheets import load_vendor_memory, save_vendor, update_vendor_sales
 
@@ -119,9 +140,16 @@ def get_session(phone):
 
 def reset_session(phone):
     SESSIONS[phone] = {"step": "start", "data": {}}
+    _save_sessions(SESSIONS)
 
 
 def handle_message(phone, body):
+    result = _handle_message_inner(phone, body)
+    _save_sessions(SESSIONS)
+    return result
+
+
+def _handle_message_inner(phone, body):
     body_raw = body.strip()
     body_low = body_raw.lower()
     session = get_session(phone)
@@ -295,7 +323,24 @@ def handle_message(phone, body):
     reset_session(phone)
     session = get_session(phone)
     session["step"] = "start"
-    return handle_message(phone, body)
+    # Ne pas rappeler handle_message pour eviter le message automatique
+    mem = _get_memory().get(phone)
+    if mem:
+        session["step"] = "vente_aujourd_hui"
+        data = session["data"]
+        data["nom"] = mem["nom"]
+        data["depot"] = mem["depot"]
+        msg = (
+            _salutation() + " Champion *" + mem["nom"] + "* ! \U0001f3c6\n\n"
+            "Depot : *" + mem["depot"] + "*\n\n"
+            + _question_vente()
+        )
+        return msg, None
+    session["step"] = "nom"
+    return (
+        _salutation() + " Champion ! Bienvenue sur *" + BRAND + "* Vendor Support. \U0001f3c6\n\n"
+        "Veuillez entrer votre *nom*."
+    ), None
 
 
 def _build_row(phone, data, commentaire):
