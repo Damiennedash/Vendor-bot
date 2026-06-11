@@ -368,7 +368,7 @@ def handle_message(phone, body):
 
         mem[phone]["last_date"]    = _today()
 
-        update_vendor_sales(phone, data.get("ventes_montant","0"), total, _today())
+        update_vendor_sales(phone, data.get("ventes_montant","0"), total, _today(), data.get("fanxtra","0"), data.get("fanchoco","0"), body_raw)
 
         session["step"] = "probleme"
 
