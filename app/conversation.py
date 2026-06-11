@@ -1,37 +1,22 @@
-# -*- coding: utf-8 -*-
-
 from datetime import datetime
 
 BRAND = "FANMILK TOGO"
 
 DEPOTS = {
-
     "1": "GERM DOSSEH",
-
     "2": "SUPER DEPOT",
-
     "3": "NBUKE RAMCO",
-
     "4": "NADONIELLA A",
-
 }
 
 ISSUE_MAP = {
-
-    "1": ("Probleme Produit",         "Product"),
-
-    "2": ("Probleme avec le gerant",  "Relationship"),
-
-    "3": ("Probleme de paiement",     "Income"),
-
-    "4": ("Conseils de vente",        "Motivation"),
-
-    "5": ("Probleme d'equipement",    "Equipment"),
-
-    "6": ("Demande support direct",   ""),
-
-    "7": ("Aucun probleme",           ""),
-
+    "1": ("Probleme Produit", "Product"),
+    "2": ("Probleme avec le gerant", "Relationship"),
+    "3": ("Probleme de paiement", "Income"),
+    "4": ("Conseils de vente", "Motivation"),
+    "5": ("Probleme d equipement", "Equipment"),
+    "6": ("Demande support direct", ""),
+    "7": ("Aucun probleme", ""),
 }
 
 SESSIONS = {}
@@ -40,436 +25,296 @@ from .sheets import load_vendor_memory, save_vendor, update_vendor_sales
 
 VENDOR_MEMORY = None
 
+
 def _get_memory():
-
     global VENDOR_MEMORY
-
     if VENDOR_MEMORY is None:
-
         try:
-
             VENDOR_MEMORY = load_vendor_memory()
-
         except Exception:
-
             VENDOR_MEMORY = {}
-
     return VENDOR_MEMORY
 
+
 MOTS_INVALIDES = [
-
-    "oui", "non", "ok", "yes", "no", "menu", "bonjour", "bonsoir",
-
-    "salut", "allo", "1", "2", "3", "4", "5", "6", "7",
-
+    "oui", "non", "ok", "yes", "no", "menu",
+    "bonjour", "bonsoir", "salut", "allo",
+    "1", "2", "3", "4", "5", "6", "7",
     "bonjour fanmilk togo", "bonsoir fanmilk togo", "fanmilk",
-
 ]
 
-def _matin():
 
+def _matin():
     return datetime.now().hour < 13
 
-def _salutation():
 
+def _salutation():
     return "Bonjour" if _matin() else "Bonsoir"
 
-def _today():
 
+def _today():
     return datetime.now().strftime("%d/%m/%Y")
 
+
 def _au_revoir(nom):
-
     if _matin():
+        return (
+            "Bonne vente *" + nom + "* ! \U0001f4aa\n\n"
+            "Votre declaration a bien ete enregistree.\n\n"
+            "A tout a l heure !"
+        )
+    return (
+        "Bonne soiree *" + nom + "* ! \U0001f319\n\n"
+        "Votre declaration a bien ete enregistree.\n\n"
+        "*A demain !*"
+    )
 
-        return "Bonne vente *" + nom + "* ! \U0001f4aa\n\nVotre declaration a bien ete enregistree.\n\nA tout a l'heure !"
-
-    return "Bonne soiree *" + nom + "* ! \U0001f319\n\nVotre declaration a bien ete enregistree.\n\n*A demain !*"
 
 def _is_nombre(text):
-
     return text.replace(" ", "").replace(",", "").replace(".", "").isdigit()
 
+
 def _menu_depots():
-
     lines = ["Choisissez votre *depot* :", ""]
-
     for k, v in DEPOTS.items():
-
         lines.append(k + " - " + v)
-
     lines += ["", "Repondez avec le *numero* correspondant."]
-
     return "\n".join(lines)
+
 
 def _question_vente():
-
     lines = [
-
-        "Concernant vos ventes *aujourd'hui* :", "",
-
+        "Concernant vos ventes *aujourd hui* :", "",
         "1 - Je vais vendre",
-
-        "2 - J'ai deja vendu",
-
-        "3 - Je ne vends pas aujourd'hui",
-
+        "2 - J ai deja vendu",
+        "3 - Je ne vends pas aujourd hui",
     ]
-
     return "\n".join(lines)
+
 
 def _menu_probleme():
-
     if _matin():
-
-        intro = "Avez-vous un probleme pour atteindre vos objectifs *aujourd'hui* ?"
-
+        intro = "Avez-vous un probleme pour atteindre vos objectifs *aujourd hui* ?"
     else:
-
         intro = "Avez-vous rencontre un probleme *au cours de la journee* ?"
-
-    lines = [intro, "",
-
-        "1 - J'ai un probleme produit",
-
-        "2 - J'ai un probleme avec mon gerant",
-
-        "3 - J'ai un probleme de paiement",
-
-        "4 - J'ai besoin de conseils de vente",
-
-        "5 - J'ai un probleme d'equipement",
-
+    lines = [
+        intro, "",
+        "1 - J ai un probleme produit",
+        "2 - J ai un probleme avec mon gerant",
+        "3 - J ai un probleme de paiement",
+        "4 - J ai besoin de conseils de vente",
+        "5 - J ai un probleme d equipement",
         "6 - Je veux parler au support",
-
         "7 - Aucun probleme", "",
-
         "Repondez avec le *numero* correspondant.",
-
     ]
-
     return "\n".join(lines)
 
+
 def get_session(phone):
-
     if phone not in SESSIONS:
-
         SESSIONS[phone] = {"step": "start", "data": {}}
-
     return SESSIONS[phone]
 
-def reset_session(phone):
 
+def reset_session(phone):
     SESSIONS[phone] = {"step": "start", "data": {}}
 
+
 def handle_message(phone, body):
-
     body_raw = body.strip()
-
     body_low = body_raw.lower()
-
     session = get_session(phone)
-
     step = session["step"]
-
     data = session["data"]
 
     if body_low == "menu":
-
         reset_session(phone)
-
         session = get_session(phone)
-
         step = session["step"]
-
         data = session["data"]
 
-    # DECLENCHEUR
-
     if step == "start":
-
         mem = _get_memory().get(phone)
-
         if mem:
-
-            nom   = mem["nom"]
-
+            nom = mem["nom"]
             depot = mem["depot"]
-
-            data["nom"]   = nom
-
+            data["nom"] = nom
             data["depot"] = depot
-
             session["step"] = "vente_aujourd_hui"
-
-            return _salutation() + " Champion *" + nom + "* ! \U0001f3c6\n\nDepot : *" + depot + "*\n\n" + _question_vente(), None
-
+            msg = (
+                _salutation() + " Champion *" + nom + "* ! \U0001f3c6\n\n"
+                "Depot : *" + depot + "*\n\n"
+                + _question_vente()
+            )
+            return msg, None
         session["step"] = "nom"
-
-        return _salutation() + " Champion ! Bienvenue sur *" + BRAND + "* Vendor Support. \U0001f3c6\n\nVeuillez entrer votre *nom complet*.", None
-
-    # NOM
+        msg = (
+            _salutation() + " Champion ! Bienvenue sur *" + BRAND + "* Vendor Support. \U0001f3c6\n\n"
+            "Veuillez entrer votre *nom*."
+        )
+        return msg, None
 
     if step == "nom":
-
         if len(body_raw) < 2 or body_low in MOTS_INVALIDES:
-
-            return "Veuillez entrer votre *nom complet* s'il vous plait.", None
-
+            return "Veuillez entrer votre *nom* s il vous plait.", None
         data["nom"] = body_raw
-
         session["step"] = "depot"
-
         return "Merci *" + body_raw + "* ! \U0001f60a\n\n" + _menu_depots(), None
 
-    # DEPOT
-
     if step == "depot":
-
         if body_raw not in DEPOTS:
-
             return _menu_depots(), None
-
         depot_nom = DEPOTS[body_raw]
-
         data["depot"] = depot_nom
-
         mem = _get_memory()
-
         if phone not in mem:
-
             mem[phone] = {}
-
-        mem[phone]["nom"]   = data["nom"]
-
+        mem[phone]["nom"] = data["nom"]
         mem[phone]["depot"] = depot_nom
-
         save_vendor(phone, data["nom"], depot_nom)
-
         session["step"] = "vente_aujourd_hui"
-
         return "Depot enregistre : *" + depot_nom + "* \u2705\n\n" + _question_vente(), None
 
-    # VENTE AUJOURD'HUI
-
     if step == "vente_aujourd_hui":
-
         mem = _get_memory().get(phone, {})
-
         deja_declare = mem.get("last_date") == _today()
 
         if body_raw == "1":
-
             data["vente_aujourd_hui"] = "Je vais vendre"
-
             if deja_declare:
-
                 session["step"] = "probleme"
-
                 return "Ventes deja enregistrees \u2705\n\n" + _menu_probleme(), None
-
             data["periode_ventes"] = "hier"
-
             session["step"] = "ventes_montant"
-
             return "Combien avez-vous vendu *hier* en FCFA ?\n_(Ex : 45000)_", None
 
-        elif body_raw == "2":
-
-            data["vente_aujourd_hui"] = "J'ai deja vendu"
-
-            data["periode_ventes"] = "aujourd'hui"
-
+        if body_raw == "2":
+            data["vente_aujourd_hui"] = "J ai deja vendu"
+            data["periode_ventes"] = "aujourd hui"
             session["step"] = "ventes_montant"
+            return "Combien avez-vous vendu *aujourd hui* en FCFA ?\n_(Ex : 45000)_", None
 
-            return "Combien avez-vous vendu *aujourd'hui* en FCFA ?\n_(Ex : 45000)_", None
-
-        elif body_raw == "3":
-
+        if body_raw == "3":
             data["vente_aujourd_hui"] = "Non"
-
             session["step"] = "probleme"
-
             return _menu_probleme(), None
 
-        else:
-
-            return _question_vente(), None
-
-    # MONTANT FCFA
+        return _question_vente(), None
 
     if step == "ventes_montant":
-
         if not _is_nombre(body_raw):
-
             return "Veuillez entrer un *nombre valide* en FCFA.\n_(Ex : 45000)_", None
-
         data["ventes_montant"] = body_raw
-
         session["step"] = "ventes_fanxtra"
-
         periode = data.get("periode_ventes", "hier")
-
-        return "Combien de *FanXtra* avez-vous vendus *" + periode + "* ?\n_(Uniquement un chiffre, ex : 12)_", None
-
-    # FANXTRA
+        return "Combien de *FanXtra* avez-vous vendus *" + periode + "* ?\n_(Chiffre uniquement, ex : 12)_", None
 
     if step == "ventes_fanxtra":
-
         if not body_raw.isdigit():
-
             return "Veuillez entrer *uniquement un chiffre*.\n_(Ex : 12)_", None
-
         data["fanxtra"] = body_raw
-
         session["step"] = "ventes_fanchoco"
-
         periode = data.get("periode_ventes", "hier")
-
-        return "Combien de *FanChoco* avez-vous vendus *" + periode + "* ?\n_(Uniquement un chiffre, ex : 8)_", None
-
-    # FANCHOCO
+        return "Combien de *FanChoco* avez-vous vendus *" + periode + "* ?\n_(Chiffre uniquement, ex : 8)_", None
 
     if step == "ventes_fanchoco":
-
         if not body_raw.isdigit():
-
             return "Veuillez entrer *uniquement un chiffre*.\n_(Ex : 8)_", None
-
         data["fanchoco"] = body_raw
-
         session["step"] = "ventes_fanvanille"
-
         periode = data.get("periode_ventes", "hier")
-
-        return "Combien de *FanVanille* avez-vous vendus *" + periode + "* ?\n_(Uniquement un chiffre, ex : 6)_", None
-
-    # FANVANILLE
+        return "Combien de *FanVanille* avez-vous vendus *" + periode + "* ?\n_(Chiffre uniquement, ex : 6)_", None
 
     if step == "ventes_fanvanille":
-
         if not body_raw.isdigit():
-
             return "Veuillez entrer *uniquement un chiffre*.\n_(Ex : 6)_", None
-
         data["fanvanille"] = body_raw
-
-        total = str(int(data.get("fanxtra","0")) + int(data.get("fanchoco","0")) + int(body_raw))
-
+        total = str(
+            int(data.get("fanxtra", "0"))
+            + int(data.get("fanchoco", "0"))
+            + int(body_raw)
+        )
         mem = _get_memory()
-
         if phone not in mem:
-
             mem[phone] = {}
-
         mem[phone]["last_montant"] = data.get("ventes_montant", "0")
-
-        mem[phone]["last_pieces"]  = total
-
-        mem[phone]["last_date"]    = _today()
-
-        update_vendor_sales(phone, data.get("ventes_montant","0"), total, _today(), data.get("fanxtra","0"), data.get("fanchoco","0"), body_raw)
-
+        mem[phone]["last_fanxtra"] = data.get("fanxtra", "0")
+        mem[phone]["last_fanchoco"] = data.get("fanchoco", "0")
+        mem[phone]["last_fanvanille"] = body_raw
+        mem[phone]["last_pieces"] = total
+        mem[phone]["last_date"] = _today()
+        update_vendor_sales(
+            phone,
+            data.get("ventes_montant", "0"),
+            total,
+            _today(),
+            data.get("fanxtra", "0"),
+            data.get("fanchoco", "0"),
+            body_raw
+        )
         session["step"] = "probleme"
-
         return _menu_probleme(), None
 
-    # PROBLEME
-
     if step == "probleme":
-
         if body_raw not in ISSUE_MAP:
-
             return _menu_probleme(), None
-
         categorie, prime = ISSUE_MAP[body_raw]
-
         data["categorie"] = categorie
-
-        data["prime"]     = prime
-
+        data["prime"] = prime
         nom = data.get("nom", "")
 
         if body_raw == "7":
-
             row = _build_row(phone, data, "")
-
             reset_session(phone)
-
             return _au_revoir(nom), row
 
         if body_raw == "6":
-
             row = _build_row(phone, data, "Demande support direct")
-
             reset_session(phone)
-
-            return "Un agent vous contactera tres prochainement. \U0001f64f\n\n" + _au_revoir(nom), row
+            return "Un agent vous contactera tres prochainement.\n\n" + _au_revoir(nom), row
 
         session["step"] = "commentaire"
-
-        return "Vous avez signale : *" + categorie + "*\n\nDecrivez brievement votre probleme _(optionnel)_ :\n_(Envoyez un tiret - si vous n'avez rien a ajouter)_", None
-
-    # COMMENTAIRE
+        return (
+            "Vous avez signale : *" + categorie + "*\n\n"
+            "Decrivez brievement votre probleme _(optionnel)_ :\n"
+            "_(Envoyez un tiret - si vous n avez rien a ajouter)_"
+        ), None
 
     if step == "commentaire":
-
         commentaire = "" if body_raw in ["-", ".", " "] else body_raw
-
         nom = data.get("nom", "")
-
         row = _build_row(phone, data, commentaire)
-
         reset_session(phone)
-
-        return "Merci ! Votre probleme a bien ete recu. \U0001f64f\n\nNotre equipe fera un suivi.\n\n" + _au_revoir(nom), row
+        return (
+            "Merci ! Votre probleme a bien ete recu.\n\n"
+            "Notre equipe fera un suivi.\n\n"
+            + _au_revoir(nom)
+        ), row
 
     reset_session(phone)
-
     session = get_session(phone)
-
     session["step"] = "start"
-
     return handle_message(phone, body)
 
 
 def _build_row(phone, data, commentaire):
-
     now = datetime.now()
-
     periode = "Matin" if now.hour < 13 else "Soir"
-
     return [
-
         now.strftime("%d/%m/%Y"),
-
         now.strftime("%H:%M"),
-
         periode,
-
         phone,
-
         data.get("nom", "-"),
-
         data.get("depot", "-"),
-
         data.get("vente_aujourd_hui", "-"),
-
         data.get("ventes_montant", "0"),
-
         data.get("fanxtra", "0"),
-
         data.get("fanchoco", "0"),
-
         data.get("fanvanille", "0"),
-
         data.get("categorie", "-"),
-
         data.get("prime", ""),
-
         commentaire,
-
         "WhatsApp QR",
-
     ]
- 
