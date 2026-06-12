@@ -256,9 +256,13 @@ def _handle_inner(phone, body):
             return "Combien avez-vous vendu *aujourd hui* en FCFA ?\n_(Ex : 45000)_", None
 
         if body_raw == "3":
-            # Ne vend pas → problemes directement
+            # Ne vend pas → chiffres vides + problemes directement
             data["vente_aujourd_hui"] = "Non"
-            data["lieu_vente"] = "-"
+            data["ventes_montant"] = ""
+            data["fanxtra"] = ""
+            data["fanchoco"] = ""
+            data["fanvanille"] = ""
+            data["lieu_vente"] = ""
             session["step"] = "probleme"
             return _menu_probleme(), None
 
