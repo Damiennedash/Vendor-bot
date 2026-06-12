@@ -9,6 +9,15 @@ DEPOTS = {
     "4": "NADONIELLA A",
 }
 
+LIEUX = {
+    "1": "Ecole",
+    "2": "Marche",
+    "3": "Eglise",
+    "4": "Gare Routiere",
+    "5": "Carrefour",
+    "6": "Dans les quartiers",
+}
+
 ISSUE_MAP = {
     "1": ("Probleme Produit", "Product"),
     "2": ("Probleme avec le gerant", "Relationship"),
@@ -98,6 +107,14 @@ def _au_revoir(nom):
 
 def _is_nombre(text):
     return text.replace(" ", "").replace(",", "").replace(".", "").isdigit()
+
+
+def _menu_lieux():
+    lines = ["Ou avez-vous vendu ?", ""]
+    for k, v in LIEUX.items():
+        lines.append(k + " - " + v)
+    lines += ["", "Repondez avec le *numero* correspondant."]
+    return "\n".join(lines)
 
 
 def _menu_depots():
@@ -218,8 +235,13 @@ def _handle_message_inner(phone, body):
         if body_raw == "1":
             data["vente_aujourd_hui"] = "Je vais vendre"
             if deja_declare:
-                session["step"] = "probleme"
-                return "Ventes deja enregistrees \u2705\n\n" + _menu_probleme(), None
+                # Reporter les ventes deja declarees
+                data["ventes_montant"] = mem.get("last_montant", "0")
+                data["fanxtra"] = mem.get("last_fanxtra", "0")
+                data["fanchoco"] = mem.get("last_fanchoco", "0")
+                data["fanvanille"] = mem.get("last_fanvanille", "0")
+                session["step"] = "lieu_vente"
+                return _menu_lieux(), None
             data["periode_ventes"] = "hier"
             session["step"] = "ventes_montant"
             return "Combien avez-vous vendu *hier* en FCFA ?\n_(Ex : 45000)_", None
@@ -288,6 +310,13 @@ def _handle_message_inner(phone, body):
             data.get("fanchoco", "0"),
             body_raw
         )
+        session["step"] = "lieu_vente"
+        return _menu_lieux(), None
+
+    if step == "lieu_vente":
+        if body_raw not in LIEUX:
+            return _menu_lieux(), None
+        data["lieu_vente"] = LIEUX[body_raw]
         session["step"] = "probleme"
         return _menu_probleme(), None
 
@@ -365,6 +394,7 @@ def _build_row(phone, data, commentaire):
         data.get("fanxtra", "0"),
         data.get("fanchoco", "0"),
         data.get("fanvanille", "0"),
+        data.get("lieu_vente", "-"),
         data.get("categorie", "-"),
         data.get("prime", ""),
         commentaire,

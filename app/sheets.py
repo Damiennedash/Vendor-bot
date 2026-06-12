@@ -15,7 +15,7 @@ SHEET_VENDORS = "Vendors"
 HEADERS_REPONSES = [
     "Date", "Heure", "Periode", "Telephone", "Nom Vendor", "Depot",
     "Statut Vente", "Ventes FCFA", "FanXtra", "FanChoco", "FanVanille",
-    "Categorie Probleme", "Pilier PRIME", "Commentaire", "Source"
+    "Lieu de vente", "Categorie Probleme", "Pilier PRIME", "Commentaire", "Source"
 ]
 
 HEADERS_VENDORS = [
