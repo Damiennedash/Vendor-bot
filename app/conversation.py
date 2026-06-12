@@ -77,6 +77,11 @@ def _today():
     return datetime.now().strftime("%d/%m/%Y")
 
 
+def _yesterday():
+    from datetime import timedelta
+    return (datetime.now() - timedelta(days=1)).strftime("%d/%m/%Y")
+
+
 def _au_revoir(nom):
     if _matin():
         return (
@@ -206,7 +211,9 @@ def _handle_message_inner(phone, body):
 
     if step == "vente_aujourd_hui":
         mem = _get_memory().get(phone, {})
-        deja_declare = mem.get("last_date") == _today()
+        last_date = mem.get("last_date", "")
+        # Ventes deja declarees si : declarees hier OU declarees aujourd'hui
+        deja_declare = last_date in [_today(), _yesterday()]
 
         if body_raw == "1":
             data["vente_aujourd_hui"] = "Je vais vendre"
