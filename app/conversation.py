@@ -18,6 +18,7 @@ LIEUX = {
     "4": "Gare Routiere",
     "5": "Carrefour",
     "6": "Dans les quartiers",
+    "7": "Autre",
 }
 
 ISSUE_MAP = {
@@ -117,11 +118,16 @@ def _menu_depots():
     return "\n".join(lines)
 
 
-def _menu_lieux():
-    lines = ["Ou avez-vous vendu ?", ""]
+def _menu_lieux(periode="aujourd hui"):
+    lines = ["Ou avez-vous vendu *" + periode + "* ?", ""]
     for k, v in LIEUX.items():
         lines.append(k + " - " + v)
-    lines += ["", "Repondez avec le *numero* correspondant."]
+    lines += [
+        "",
+        "Vous pouvez choisir *plusieurs lieux*.",
+        "_(Ex : 1 2 4 pour Ecole, Marche et Gare Routiere)_",
+        "_(Tapez 7 si vous avez vendu ailleurs)_",
+    ]
     return "\n".join(lines)
 
 
@@ -320,19 +326,38 @@ def _handle_inner(phone, body):
             data.get("fanchoco", "0"),
             body_raw
         )
-        # Demander le lieu SEULEMENT si la personne a deja vendu
-        if data.get("vente_aujourd_hui") == "J ai deja vendu":
-            session["step"] = "lieu_vente"
-            return _menu_lieux(), None
-        data["lieu_vente"] = "-"
-        session["step"] = "probleme"
-        return _menu_probleme(), None
+        # Demander le lieu dans tous les cas (hier ou aujourd hui)
+        periode = data.get("periode_ventes", "hier")
+        session["step"] = "lieu_vente"
+        return _menu_lieux(periode), None
 
     # LIEU DE VENTE
     if step == "lieu_vente":
-        if body_raw not in LIEUX:
-            return _menu_lieux(), None
-        data["lieu_vente"] = LIEUX[body_raw]
+        periode = data.get("periode_ventes", "hier")
+        # Accepter choix multiples ex: "1 2 4"
+        choix = body_raw.replace(",", " ").split()
+        lieux_valides = [c for c in choix if c in LIEUX]
+        if not lieux_valides:
+            return _menu_lieux(periode), None
+        lieux_noms = [LIEUX[c] for c in lieux_valides]
+        if "7" in lieux_valides:
+            # Enlever "Autre" et demander de preciser
+            lieux_noms = [l for l in lieux_noms if l != "Autre"]
+            data["lieu_vente_temp"] = ", ".join(lieux_noms) if lieux_noms else ""
+            session["step"] = "lieu_autre"
+            return "Precisez le lieu :\n_(Ex : Bord de mer, Stade)_", None
+        data["lieu_vente"] = ", ".join(lieux_noms)
+        session["step"] = "probleme"
+        return _menu_probleme(), None
+
+    # LIEU AUTRE (precision)
+    if step == "lieu_autre":
+        autre = body_raw
+        existants = data.get("lieu_vente_temp", "")
+        if existants:
+            data["lieu_vente"] = existants + ", " + autre
+        else:
+            data["lieu_vente"] = autre
         session["step"] = "probleme"
         return _menu_probleme(), None
 
