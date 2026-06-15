@@ -256,15 +256,12 @@ def _handle_inner(phone, body):
             return "Combien avez-vous vendu *aujourd hui* en FCFA ?\n_(Ex : 45000)_", None
 
         if body_raw == "3":
-            # Ne vend pas → chiffres vides + problemes directement
+            # Ne vend pas → demander chiffres d hier quand meme
             data["vente_aujourd_hui"] = "Non"
-            data["ventes_montant"] = ""
-            data["fanxtra"] = ""
-            data["fanchoco"] = ""
-            data["fanvanille"] = ""
             data["lieu_vente"] = ""
-            session["step"] = "probleme"
-            return _menu_probleme(), None
+            data["periode_ventes"] = "hier"
+            session["step"] = "ventes_montant"
+            return "Combien avez-vous vendu *hier* en FCFA ?\n_(Ex : 45000)_", None
 
         return _question_vente(), None
 
@@ -409,11 +406,11 @@ def _build_row(phone, data, commentaire):
         data.get("nom", "-"),
         data.get("depot", "-"),
         data.get("vente_aujourd_hui", "-"),
-        data.get("ventes_montant", "0"),
-        data.get("fanxtra", "0"),
-        data.get("fanchoco", "0"),
-        data.get("fanvanille", "0"),
-        data.get("lieu_vente", "-"),
+        data.get("ventes_montant", ""),
+        data.get("fanxtra", ""),
+        data.get("fanchoco", ""),
+        data.get("fanvanille", ""),
+        data.get("lieu_vente", ""),
         data.get("categorie", "-"),
         data.get("prime", ""),
         commentaire,
