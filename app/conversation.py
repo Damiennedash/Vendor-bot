@@ -9,6 +9,8 @@ DEPOTS = {
     "2": "SUPER DEPOT",
     "3": "NBUKE RAMCO",
     "4": "NADONIELLA A",
+    "5": "SAINT MARTIN",
+    "6": "YEHONAM",
 }
 
 LIEUX = {
