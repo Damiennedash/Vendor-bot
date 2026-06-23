@@ -43,9 +43,6 @@ MOTS_INVALIDES = [
 _SESSIONS_FILE = "/tmp/sessions.json"
 
 
-# ──────────────────────────────────────────────────────────────
-#  SESSIONS
-# ──────────────────────────────────────────────────────────────
 def _load_sessions():
     try:
         if os.path.exists(_SESSIONS_FILE):
@@ -66,7 +63,6 @@ def _save_sessions(sessions):
 
 SESSIONS = _load_sessions()
 
-# Import unique — upsert_vendor remplace save_vendor + update_vendor_sales
 from .sheets import load_vendor_memory, upsert_vendor, append_row
 
 VENDOR_MEMORY = None
@@ -82,9 +78,6 @@ def _get_memory():
     return VENDOR_MEMORY
 
 
-# ──────────────────────────────────────────────────────────────
-#  HELPERS
-# ──────────────────────────────────────────────────────────────
 def _matin():
     return datetime.now().hour < 13
 
@@ -169,9 +162,6 @@ def _menu_probleme():
     return "\n".join(lines)
 
 
-# ──────────────────────────────────────────────────────────────
-#  GESTION SESSIONS
-# ──────────────────────────────────────────────────────────────
 def get_session(phone):
     if phone not in SESSIONS:
         SESSIONS[phone] = {"step": "start", "data": {}}
@@ -189,10 +179,11 @@ def handle_message(phone, body):
     return result
 
 
-# ──────────────────────────────────────────────────────────────
-#  CONSTRUCTION LIGNE RÉPONSE
-# ──────────────────────────────────────────────────────────────
 def _build_row(phone, data, commentaire):
+    """
+    Construit la ligne pour l'onglet Reponses Vendors.
+    Appelée UNE SEULE FOIS à la fin de la conversation.
+    """
     now    = datetime.now()
     periode = "Matin" if now.hour < 13 else "Soir"
     return [
@@ -215,9 +206,6 @@ def _build_row(phone, data, commentaire):
     ]
 
 
-# ──────────────────────────────────────────────────────────────
-#  LOGIQUE PRINCIPALE
-# ──────────────────────────────────────────────────────────────
 def _handle_inner(phone, body):
     body_raw = body.strip()
     body_low = body_raw.lower()
@@ -233,6 +221,8 @@ def _handle_inner(phone, body):
 
     # ══════════════════════════════════════════════════════════
     #  START — 1er message reçu
+    #  ✅ On enregistre dans Vendors IMMÉDIATEMENT (nom + dépôt)
+    #  Sans ventes → pas de données biaisées
     # ══════════════════════════════════════════════════════════
     if step == "start":
         mem = _get_memory().get(phone)
@@ -241,10 +231,8 @@ def _handle_inner(phone, body):
             depot = mem["depot"]
             data["nom"]   = nom
             data["depot"] = depot
-
-            # ✅ Rafraîchit la ligne dans Vendors dès le 1er message
+            # ✅ MAJ Vendors : seulement nom + dépôt + date (PAS les ventes)
             upsert_vendor(phone, nom, depot)
-
             session["step"] = "vente_aujourd_hui"
             return (
                 _salutation() + " Champion *" + nom + "* ! \U0001f3c6\n\n"
@@ -264,32 +252,27 @@ def _handle_inner(phone, body):
     if step == "nom":
         if len(body_raw) < 2 or body_low in MOTS_INVALIDES:
             return "Veuillez entrer votre *nom* s il vous plait.", None
-
         data["nom"]     = body_raw
         session["step"] = "depot"
         return "Merci *" + body_raw + "* ! \U0001f60a\n\n" + _menu_depots(), None
 
     # ══════════════════════════════════════════════════════════
-    #  DEPOT — ✅ enregistrement immédiat dans Vendors
+    #  DEPOT
+    #  ✅ Vendors mis à jour : nom + dépôt seulement (PAS les ventes)
     # ══════════════════════════════════════════════════════════
     if step == "depot":
         if body_raw not in DEPOTS:
             return _menu_depots(), None
-
         depot_nom     = DEPOTS[body_raw]
         data["depot"] = depot_nom
         nom           = data.get("nom", "")
-
-        # Mettre à jour mémoire locale
-        mem = _get_memory()
+        mem           = _get_memory()
         if phone not in mem:
             mem[phone] = {}
         mem[phone]["nom"]   = nom
         mem[phone]["depot"] = depot_nom
-
-        # ✅ Créer/MAJ ligne dans Vendors (nom + dépôt connus)
+        # ✅ Vendors : nom + dépôt uniquement
         upsert_vendor(phone, nom, depot_nom)
-
         session["step"] = "vente_aujourd_hui"
         return "Depot enregistre : *" + depot_nom + "* \u2705\n\n" + _question_vente(), None
 
@@ -302,10 +285,11 @@ def _handle_inner(phone, body):
         deja_declare = last_date in [_today(), _yesterday()]
 
         if body_raw == "1":
+            # "Je vais vendre" → chiffres = VENTES DE LA VEILLE
             data["vente_aujourd_hui"] = "Je vais vendre"
             data["lieu_vente"]        = "-"
+            data["is_today_sale"]     = False  # ← ventes d'hier
             if deja_declare:
-                # Ventes déjà saisies → on reporte sans redemander
                 data["ventes_montant"] = mem.get("last_montant",    "0")
                 data["fanxtra"]        = mem.get("last_fanxtra",    "0")
                 data["fanchoco"]       = mem.get("last_fanchoco",   "0")
@@ -317,14 +301,18 @@ def _handle_inner(phone, body):
             return "Combien avez-vous vendu *hier* en FCFA ?\n_(Ex : 45000)_", None
 
         if body_raw == "2":
+            # "J'ai deja vendu" → chiffres = VENTES D'AUJOURD'HUI
             data["vente_aujourd_hui"] = "J ai deja vendu"
             data["periode_ventes"]    = "aujourd hui"
+            data["is_today_sale"]     = True   # ← ventes du jour
             session["step"]           = "ventes_montant"
             return "Combien avez-vous vendu *aujourd hui* en FCFA ?\n_(Ex : 45000)_", None
 
         if body_raw == "3":
+            # "Je ne vends pas" → chiffres = VENTES DE LA VEILLE
             data["vente_aujourd_hui"] = "Non"
             data["lieu_vente"]        = "-"
+            data["is_today_sale"]     = False  # ← ventes d'hier
             data["periode_ventes"]    = "hier"
             session["step"]           = "ventes_montant"
             return "Combien avez-vous vendu *hier* en FCFA ?\n_(Ex : 45000)_", None
@@ -365,7 +353,9 @@ def _handle_inner(phone, body):
         return "Combien de *FanVanille* avez-vous vendus *" + periode + "* ?\n_(Chiffre uniquement, ex : 6)_", None
 
     # ══════════════════════════════════════════════════════════
-    #  FANVANILLE — ✅ Vendors mis à jour immédiatement
+    #  FANVANILLE
+    #  ✅ Vendors mis à jour avec les ventes
+    #  ✅ is_today_sale indique si c'est aujourd'hui ou hier
     # ══════════════════════════════════════════════════════════
     if step == "ventes_fanvanille":
         if not body_raw.isdigit():
@@ -379,8 +369,9 @@ def _handle_inner(phone, body):
         total_pieces       = str(int(fanxtra) + int(fanchoco) + int(fanvanille))
         nom                = data.get("nom",   "")
         depot              = data.get("depot", "")
+        is_today           = data.get("is_today_sale", True)
 
-        # Mettre à jour mémoire locale
+        # ✅ MAJ mémoire locale (toujours — pour se souvenir des derniers chiffres)
         mem = _get_memory()
         if phone not in mem:
             mem[phone] = {}
@@ -393,7 +384,7 @@ def _handle_inner(phone, body):
             "last_date":       _today(),
         })
 
-        # ✅ MAJ immédiate dans Vendors (ventes complètes)
+        # ✅ MAJ Vendors avec les ventes (on passe is_today_sale pour info)
         upsert_vendor(
             phone, nom, depot,
             montant=montant,
@@ -401,7 +392,8 @@ def _handle_inner(phone, body):
             fanchoco=fanchoco,
             fanvanille=fanvanille,
             pieces=total_pieces,
-            date_vente=_today()
+            date_vente=_today(),
+            is_today_sale=is_today,
         )
 
         periode         = data.get("periode_ventes", "hier")
@@ -415,18 +407,14 @@ def _handle_inner(phone, body):
         periode       = data.get("periode_ventes", "hier")
         choix         = body_raw.replace(",", " ").split()
         lieux_valides = [c for c in choix if c in LIEUX]
-
         if not lieux_valides:
             return _menu_lieux(periode), None
-
         lieux_noms = [LIEUX[c] for c in lieux_valides]
-
         if "7" in lieux_valides:
             lieux_noms              = [l for l in lieux_noms if l != "Autre"]
             data["lieu_vente_temp"] = ", ".join(lieux_noms) if lieux_noms else ""
             session["step"]         = "lieu_autre"
             return "Precisez le lieu :\n_(Ex : Bord de mer, Stade)_", None
-
         data["lieu_vente"] = ", ".join(lieux_noms)
         session["step"]    = "probleme"
         return _menu_probleme(), None
@@ -446,19 +434,17 @@ def _handle_inner(phone, body):
     if step == "probleme":
         if body_raw not in ISSUE_MAP:
             return _menu_probleme(), None
-
         categorie, prime  = ISSUE_MAP[body_raw]
         data["categorie"] = categorie
         data["prime"]     = prime
         nom               = data.get("nom", "")
 
-        # Aucun problème → fin immédiate
         if body_raw == "7":
+            # ✅ Réponses Vendors écrit ici (fin de conversation)
             row = _build_row(phone, data, "")
             reset_session(phone)
             return _au_revoir(nom), row
 
-        # Support direct → fin immédiate
         if body_raw == "6":
             row = _build_row(phone, data, "Demande support direct")
             reset_session(phone)
@@ -472,7 +458,8 @@ def _handle_inner(phone, body):
         ), None
 
     # ══════════════════════════════════════════════════════════
-    #  COMMENTAIRE — ✅ fin de conversation, tout est enregistré
+    #  COMMENTAIRE
+    #  ✅ Réponses Vendors écrit ici (fin de conversation)
     # ══════════════════════════════════════════════════════════
     if step == "commentaire":
         commentaire = "" if body_raw in ["-", ".", " "] else body_raw
@@ -495,7 +482,6 @@ def _handle_inner(phone, body):
         session["step"]          = "vente_aujourd_hui"
         session["data"]["nom"]   = mem["nom"]
         session["data"]["depot"] = mem["depot"]
-        # ✅ synchro Vendors au redémarrage de session
         upsert_vendor(phone, mem["nom"], mem["depot"])
         return (
             _salutation() + " Champion *" + mem["nom"] + "* ! \U0001f3c6\n\n"

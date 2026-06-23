@@ -7,7 +7,7 @@ from googleapiclient.discovery import build
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+SCOPES         = ["https://www.googleapis.com/auth/spreadsheets"]
 SPREADSHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 SHEET_REPONSES = os.getenv("GOOGLE_SHEET_TAB", "Reponses Vendors")
 SHEET_VENDORS  = "Vendors"
@@ -25,9 +25,6 @@ HEADERS_VENDORS = [
 ]
 
 
-# ──────────────────────────────────────────────────────────────
-#  SERVICE SHEETS
-# ──────────────────────────────────────────────────────────────
 def _get_service():
     creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
     if not creds_json:
@@ -38,22 +35,18 @@ def _get_service():
 
 
 def _ensure_sheet(service, sheet_name, headers):
-    """Crée l'onglet et ses en-têtes s'ils n'existent pas encore."""
     meta     = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
     existing = [s["properties"]["title"] for s in meta["sheets"]]
-
     if sheet_name not in existing:
         service.spreadsheets().batchUpdate(
             spreadsheetId=SPREADSHEET_ID,
             body={"requests": [{"addSheet": {"properties": {"title": sheet_name}}}]}
         ).execute()
         logger.info("Onglet '{}' cree".format(sheet_name))
-
     result = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
         range="{}!A1:Z1".format(sheet_name)
     ).execute()
-
     if not result.get("values"):
         service.spreadsheets().values().update(
             spreadsheetId=SPREADSHEET_ID,
@@ -68,19 +61,13 @@ def _ensure_sheet(service, sheet_name, headers):
 #  LECTURE MÉMOIRE VENDORS
 # ──────────────────────────────────────────────────────────────
 def load_vendor_memory():
-    """
-    Charge tous les vendors depuis l'onglet 'Vendors'.
-    Retourne un dict { telephone: { nom, depot, last_* } }
-    """
     try:
         service = _get_service()
         _ensure_sheet(service, SHEET_VENDORS, HEADERS_VENDORS)
-
-        result = service.spreadsheets().values().get(
+        result  = service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
             range="{}!A2:J".format(SHEET_VENDORS)
         ).execute()
-
         rows   = result.get("values", [])
         memory = {}
         for row in rows:
@@ -99,55 +86,63 @@ def load_vendor_memory():
                 "last_pieces":     str(row[8])         if len(row) > 8 else "0",
                 "last_date":       str(row[9])         if len(row) > 9 else "",
             }
-
         logger.info("Memoire chargee : {} vendors".format(len(memory)))
         return memory
-
     except Exception as e:
         logger.error("Erreur chargement memoire : {}".format(e))
         return {}
 
 
 # ──────────────────────────────────────────────────────────────
-#  UPSERT VENDOR — cœur du système
-#  Crée OU met à jour la ligne complète d'un vendor.
-#  Appelé dès que le vendor donne nom+dépôt, puis quand il
-#  donne ses ventes pour compléter les colonnes E→J.
+#  UPSERT VENDOR
+#  - Sans ventes : enregistre juste nom + dépôt (étape identification)
+#  - Avec ventes : met à jour les colonnes E→J (étape chiffres)
+#  - is_today_sale=True  → ventes du jour   (J ai deja vendu)
+#  - is_today_sale=False → ventes de la veille (Je vais vendre / Non)
+#    Dans ce cas on met à jour Vendors mais en gardant la logique
 # ──────────────────────────────────────────────────────────────
 def upsert_vendor(phone, nom, depot,
                   montant="", fanxtra="", fanchoco="", fanvanille="",
-                  pieces="", date_vente=""):
-    """
-    Colonnes Vendors :
-      A=Telephone  B=Nom  C=Depot  D=Derniere declaration
-      E=Dernieres ventes FCFA  F=FanXtra  G=FanChoco  H=FanVanille
-      I=Total pieces  J=Date dernieres ventes
-    """
+                  pieces="", date_vente="", is_today_sale=True):
     try:
         service = _get_service()
         _ensure_sheet(service, SHEET_VENDORS, HEADERS_VENDORS)
 
-        # Lire colonne A pour localiser le vendor
         result = service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
             range="{}!A:A".format(SHEET_VENDORS)
         ).execute()
-        phones = [str(r[0]).strip() if r else "" for r in result.get("values", [])]
+        phones  = [str(r[0]).strip() if r else "" for r in result.get("values", [])]
+        now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-        now_str  = datetime.now().strftime("%d/%m/%Y %H:%M")
-        row_data = [
-            phone, nom, depot, now_str,
-            montant, fanxtra, fanchoco, fanvanille, pieces, date_vente,
-        ]
+        # Si pas de données de ventes → on ne met à jour que nom/dépôt/date
+        if not montant and not fanxtra:
+            row_data = [phone, nom, depot, now_str, "", "", "", "", "", ""]
+        else:
+            row_data = [
+                phone, nom, depot, now_str,
+                montant, fanxtra, fanchoco, fanvanille, pieces, date_vente,
+            ]
 
         if phone in phones:
             row_num = phones.index(phone) + 1
-            service.spreadsheets().values().update(
-                spreadsheetId=SPREADSHEET_ID,
-                range="{}!A{}:J{}".format(SHEET_VENDORS, row_num, row_num),
-                valueInputOption="USER_ENTERED",
-                body={"values": [row_data]}
-            ).execute()
+
+            if not montant and not fanxtra:
+                # Mise à jour partielle : seulement A→D (nom, dépôt, date)
+                service.spreadsheets().values().update(
+                    spreadsheetId=SPREADSHEET_ID,
+                    range="{}!A{}:D{}".format(SHEET_VENDORS, row_num, row_num),
+                    valueInputOption="USER_ENTERED",
+                    body={"values": [[phone, nom, depot, now_str]]}
+                ).execute()
+            else:
+                # Mise à jour complète A→J
+                service.spreadsheets().values().update(
+                    spreadsheetId=SPREADSHEET_ID,
+                    range="{}!A{}:J{}".format(SHEET_VENDORS, row_num, row_num),
+                    valueInputOption="USER_ENTERED",
+                    body={"values": [row_data]}
+                ).execute()
             logger.info("Vendor mis a jour : {} — {}".format(phone, nom))
         else:
             service.spreadsheets().values().append(
@@ -158,74 +153,25 @@ def upsert_vendor(phone, nom, depot,
                 body={"values": [row_data]}
             ).execute()
             logger.info("Nouveau vendor cree : {} — {}".format(phone, nom))
-
         return True
-
     except Exception as e:
         logger.error("Erreur upsert_vendor : {}".format(e))
         return False
 
 
-# ──────────────────────────────────────────────────────────────
-#  ALIASES — gardés pour compatibilité avec main.py existant
-# ──────────────────────────────────────────────────────────────
 def save_vendor(phone, nom, depot):
-    """Alias : enregistre nom + dépôt sans données de ventes."""
+    """Alias : identifie le vendor (sans ventes)."""
     return upsert_vendor(phone, nom, depot)
-
-
-def update_vendor_sales(phone, montant, pieces, date,
-                        fanxtra="0", fanchoco="0", fanvanille="0"):
-    """Alias : met à jour uniquement les colonnes ventes."""
-    try:
-        service = _get_service()
-        result  = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range="{}!A:B".format(SHEET_VENDORS)
-        ).execute()
-        rows   = result.get("values", [])
-        phones = [str(r[0]).strip() if r else "" for r in rows]
-        noms   = [str(r[1]).strip() if len(r) > 1 else "" for r in rows]
-
-        if phone not in phones:
-            logger.warning("update_vendor_sales: vendor {} introuvable".format(phone))
-            return False
-
-        idx     = phones.index(phone)
-        row_num = idx + 1
-        nom     = noms[idx] if idx < len(noms) else ""
-        depot   = ""
-
-        # Récupérer le dépôt pour upsert complet
-        full = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range="{}!A{}:C{}".format(SHEET_VENDORS, row_num, row_num)
-        ).execute()
-        fv = full.get("values", [[]])[0]
-        depot = str(fv[2]).strip() if len(fv) > 2 else ""
-
-        return upsert_vendor(phone, nom, depot,
-                             montant=montant, fanxtra=fanxtra,
-                             fanchoco=fanchoco, fanvanille=fanvanille,
-                             pieces=pieces, date_vente=date)
-
-    except Exception as e:
-        logger.error("Erreur update_vendor_sales : {}".format(e))
-        return False
 
 
 # ──────────────────────────────────────────────────────────────
 #  ÉCRITURE DANS "Reponses Vendors"
+#  Appelé UNE SEULE FOIS à la fin de chaque conversation
 # ──────────────────────────────────────────────────────────────
 def append_row(row):
-    """
-    Ajoute une ligne dans l'onglet 'Reponses Vendors'.
-    Appelé depuis main.py à chaque fin de conversation.
-    """
     try:
         service = _get_service()
         _ensure_sheet(service, SHEET_REPONSES, HEADERS_REPONSES)
-
         service.spreadsheets().values().append(
             spreadsheetId=SPREADSHEET_ID,
             range="{}!A1".format(SHEET_REPONSES),
@@ -233,9 +179,9 @@ def append_row(row):
             insertDataOption="INSERT_ROWS",
             body={"values": [row]}
         ).execute()
-        logger.info("Reponse enregistree pour {}".format(row[3] if len(row) > 3 else "?"))
+        logger.info("Reponse enregistree pour {}".format(
+            row[3] if len(row) > 3 else "?"))
         return True
-
     except Exception as e:
         logger.error("Erreur append_row : {}".format(e))
         return False
